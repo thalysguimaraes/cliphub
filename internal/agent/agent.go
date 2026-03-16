@@ -98,7 +98,9 @@ func (a *Agent) Run(ctx context.Context) error {
 			result, ct := a.monitor.Poll()
 			if result == PollNewContent {
 				if err := a.sendToHub(ctx, ct); err != nil {
-					slog.Error("failed to send clip to hub", "err", err)
+					slog.Error("failed to send clip to hub, will retry", "err", err)
+				} else {
+					a.monitor.MarkSent()
 				}
 			}
 		}

@@ -14,6 +14,8 @@ type ClipboardMonitor struct {
 	lastWrittenMime string // MIME type of the last item we wrote.
 	lastSeenHash    string // Hash of the last item we read from clipboard.
 	lastSeenMime    string // MIME type of the last item we read.
+	pendingHash     string // Hash of content returned by Poll but not yet sent.
+	pendingMime     string // MIME type of content returned by Poll but not yet sent.
 	clip            clipboard.Clipboard
 }
 
@@ -51,14 +53,29 @@ func (m *ClipboardMonitor) Poll() (PollResult, clipboard.Content) {
 		return PollNoChange, clipboard.Content{}
 	}
 
-	m.lastSeenHash = hash
-	m.lastSeenMime = ct.MimeType
-
 	if hash == m.lastWrittenHash && ct.MimeType == m.lastWrittenMime {
+		// Our own write echoing back. Commit as seen.
+		m.lastSeenHash = hash
+		m.lastSeenMime = ct.MimeType
 		return PollOwnWrite, clipboard.Content{}
 	}
 
+	// Genuine new content. Don't commit as lastSeen yet — the caller
+	// must call MarkSent() after successful transmission so that a
+	// failed send doesn't silently drop the item.
+	m.pendingHash = hash
+	m.pendingMime = ct.MimeType
 	return PollNewContent, ct
+}
+
+// MarkSent commits the pending poll state after a successful send to the hub.
+// If not called, the next Poll() will return the same content again, ensuring
+// no local clipboard changes are silently dropped on transient send failures.
+func (m *ClipboardMonitor) MarkSent() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastSeenHash = m.pendingHash
+	m.lastSeenMime = m.pendingMime
 }
 
 // ApplyRemote writes a remote clipboard item to the local clipboard.
