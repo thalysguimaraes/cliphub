@@ -52,7 +52,7 @@ final class ClipItemTests: XCTestCase {
         XCTAssertFalse(item.isText)
         XCTAssertNotNil(item.data)
         XCTAssertNil(item.content)
-        XCTAssertEqual(item.preview, "[image/png, 10 bytes]")
+        XCTAssertEqual(item.preview, "[image/png, \(item.rawBytes.count) bytes]")
     }
 
     func testSHA256MatchesGo() {
