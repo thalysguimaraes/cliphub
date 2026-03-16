@@ -106,37 +106,68 @@ func (a *Agent) Run(ctx context.Context) error {
 }
 
 func (a *Agent) bootstrap(ctx context.Context) {
+	backoff := 500 * time.Millisecond
+	const maxRetries = 5
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		ok := a.tryBootstrap(ctx)
+		if ok {
+			return
+		}
+		if ctx.Err() != nil {
+			a.bootstrapped.Store(true)
+			return
+		}
+		slog.Warn("bootstrap: retry", "attempt", attempt, "retry_in", backoff)
+		select {
+		case <-ctx.Done():
+			a.bootstrapped.Store(true)
+			return
+		case <-time.After(backoff):
+		}
+		backoff = min(backoff*2, 5*time.Second)
+	}
+
+	slog.Error("bootstrap: all retries exhausted, proceeding without hub state")
+	a.bootstrapped.Store(true)
+}
+
+// tryBootstrap attempts a single bootstrap fetch. Returns true on success.
+func (a *Agent) tryBootstrap(ctx context.Context) bool {
 	req, err := http.NewRequestWithContext(ctx, "GET", a.hubURL+"/api/clip", nil)
 	if err != nil {
 		slog.Error("bootstrap: build request failed", "err", err)
-		a.bootstrapped.Store(true)
-		return
+		return false
 	}
 
 	resp, err := a.client.Do(req)
 	if err != nil {
-		slog.Warn("bootstrap: fetch failed, will sync from local clipboard", "err", err)
-		a.bootstrapped.Store(true)
-		return
+		slog.Warn("bootstrap: fetch failed", "err", err)
+		return false
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNoContent {
 		slog.Info("bootstrap: hub has no current clip")
 		a.bootstrapped.Store(true)
-		return
+		return true
+	}
+
+	if resp.StatusCode >= 400 {
+		slog.Warn("bootstrap: hub returned error", "status", resp.StatusCode)
+		return false
 	}
 
 	var item protocol.ClipItem
 	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
 		slog.Warn("bootstrap: decode failed", "err", err)
-		a.bootstrapped.Store(true)
-		return
+		return false
 	}
 
 	a.applyRemote(item)
 	slog.Info("bootstrap: applied hub clip", "seq", item.Seq, "source", item.Source, "mime", item.MimeType)
 	a.bootstrapped.Store(true)
+	return true
 }
 
 func (a *Agent) applyRemote(item protocol.ClipItem) {

@@ -16,10 +16,6 @@
 	<string>/tmp/clipd.log</string>
 	<key>StandardErrorPath</key>
 	<string>/tmp/clipd.log</string>
-	<key>EnvironmentVariables</key>
-	<dict>
-		<key>CLIPHUB_HUB</key>
-		<string>https://cliphub.your-tailnet.ts.net</string>
-	</dict>
+	<!-- Hub is auto-discovered from tailnet. Set CLIPHUB_HUB only to override. -->
 </dict>
 </plist>

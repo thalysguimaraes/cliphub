@@ -8,7 +8,8 @@ Type=simple
 ExecStart=/usr/local/bin/clipd
 Restart=on-failure
 RestartSec=5
-Environment=CLIPHUB_HUB=https://cliphub.your-tailnet.ts.net
+# Hub is auto-discovered from tailnet. Set CLIPHUB_HUB only to override:
+# Environment=CLIPHUB_HUB=https://cliphub.your-tailnet.ts.net
 
 [Install]
 WantedBy=default.target

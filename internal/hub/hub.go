@@ -75,7 +75,7 @@ func (h *Hub) Put(in PutInput) (protocol.ClipItem, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 
-	if h.current != nil && h.current.Hash == hash {
+	if h.current != nil && h.current.Hash == hash && h.current.MimeType == in.MimeType {
 		return *h.current, false
 	}
 

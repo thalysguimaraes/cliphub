@@ -11,7 +11,9 @@ import (
 type ClipboardMonitor struct {
 	mu              sync.Mutex
 	lastWrittenHash string // Hash of the last item we wrote (from remote).
+	lastWrittenMime string // MIME type of the last item we wrote.
 	lastSeenHash    string // Hash of the last item we read from clipboard.
+	lastSeenMime    string // MIME type of the last item we read.
 	clip            clipboard.Clipboard
 }
 
@@ -45,13 +47,14 @@ func (m *ClipboardMonitor) Poll() (PollResult, clipboard.Content) {
 
 	hash := protocol.HashBytes(ct.Data)
 
-	if hash == m.lastSeenHash {
+	if hash == m.lastSeenHash && ct.MimeType == m.lastSeenMime {
 		return PollNoChange, clipboard.Content{}
 	}
 
 	m.lastSeenHash = hash
+	m.lastSeenMime = ct.MimeType
 
-	if hash == m.lastWrittenHash {
+	if hash == m.lastWrittenHash && ct.MimeType == m.lastWrittenMime {
 		return PollOwnWrite, clipboard.Content{}
 	}
 
@@ -66,6 +69,7 @@ func (m *ClipboardMonitor) ApplyRemote(ct clipboard.Content) error {
 
 	m.mu.Lock()
 	m.lastWrittenHash = hash
+	m.lastWrittenMime = ct.MimeType
 	m.mu.Unlock()
 
 	if err := m.clip.Write(ct); err != nil {
@@ -80,11 +84,14 @@ func (m *ClipboardMonitor) ApplyRemote(ct clipboard.Content) error {
 		readBackHash := protocol.HashBytes(readBack.Data)
 		m.mu.Lock()
 		m.lastSeenHash = readBackHash
+		m.lastSeenMime = readBack.MimeType
 		m.lastWrittenHash = readBackHash
+		m.lastWrittenMime = readBack.MimeType
 		m.mu.Unlock()
 	} else {
 		m.mu.Lock()
 		m.lastSeenHash = hash
+		m.lastSeenMime = ct.MimeType
 		m.mu.Unlock()
 	}
 
