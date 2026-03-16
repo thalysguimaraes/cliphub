@@ -1,4 +1,5 @@
 import SwiftUI
+import ClipHubKit
 
 struct TailPasteView: View {
     @Bindable var viewModel: KeyboardViewModel

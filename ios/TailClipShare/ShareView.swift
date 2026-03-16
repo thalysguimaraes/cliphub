@@ -1,4 +1,5 @@
 import SwiftUI
+import ClipHubKit
 
 struct ShareView: View {
     @Bindable var viewModel: ShareViewModel

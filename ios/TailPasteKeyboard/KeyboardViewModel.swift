@@ -1,5 +1,6 @@
 import Foundation
 import UIKit
+import ClipHubKit
 
 @Observable
 final class KeyboardViewModel {

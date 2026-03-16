@@ -1,5 +1,6 @@
 import SwiftUI
 import UniformTypeIdentifiers
+import ClipHubKit
 
 struct CurrentClipView: View {
     @Environment(AppViewModel.self) private var viewModel

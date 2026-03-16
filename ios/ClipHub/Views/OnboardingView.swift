@@ -1,4 +1,5 @@
 import SwiftUI
+import ClipHubKit
 
 struct OnboardingView: View {
     @Environment(AppViewModel.self) private var viewModel

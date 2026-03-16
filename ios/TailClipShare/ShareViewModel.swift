@@ -1,5 +1,6 @@
 import Foundation
 import UniformTypeIdentifiers
+import ClipHubKit
 
 @Observable
 final class ShareViewModel {
