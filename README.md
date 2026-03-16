@@ -65,12 +65,16 @@ The hub becomes reachable at `https://cliphub.<your-tailnet>.ts.net`.
 On each machine you want to sync:
 
 ```bash
+# Auto-discovers the hub by querying tailscale for a "cliphub" peer
+clipd
+
+# Or specify explicitly
 clipd -hub https://cliphub.<your-tailnet>.ts.net
 ```
 
 Flags:
-- `-hub URL` — hub address (also reads `CLIPHUB_HUB` env var)
-- `-node NAME` — override node name (defaults to hostname)
+- `-hub URL` — hub address (auto-discovered from tailnet, or `CLIPHUB_HUB` env var)
+- `-node NAME` — this node's name (auto-discovered from tailscale, or hostname)
 - `-poll MS` — poll interval in milliseconds (default: 500)
 
 ### CLI
@@ -86,7 +90,7 @@ tailclip pause                # pause sync on this machine
 tailclip resume               # resume sync
 ```
 
-Use `--hub URL` or set `CLIPHUB_HUB` to point at your hub.
+Both `clipd` and `tailclip` auto-discover the hub by looking for a `cliphub` node on your tailnet. Override with `--hub URL` or `CLIPHUB_HUB` env var.
 
 ## How it works
 
@@ -113,11 +117,43 @@ This dual-hash approach prevents the feedback loop where writing a remote update
 | `GET` | `/api/clip/stream` | WebSocket stream of updates |
 | `GET` | `/api/status` | Hub status |
 
+## Running as a service
+
+### Linux (systemd)
+
+```bash
+# Hub
+sudo cp bin/cliphub /usr/local/bin/
+sudo cp init/systemd/cliphub.service /etc/systemd/system/
+sudo systemctl enable --now cliphub
+
+# Agent (user service — needs graphical session for clipboard access)
+cp bin/clipd /usr/local/bin/
+cp init/systemd/clipd.service ~/.config/systemd/user/
+# Edit the CLIPHUB_HUB env var, or rely on auto-discovery
+systemctl --user enable --now clipd
+```
+
+### macOS (launchd)
+
+```bash
+# Hub
+sudo cp bin/cliphub /usr/local/bin/
+cp init/launchd/com.cliphub.hub.plist ~/Library/LaunchAgents/
+launchctl load ~/Library/LaunchAgents/com.cliphub.hub.plist
+
+# Agent
+sudo cp bin/clipd /usr/local/bin/
+cp init/launchd/com.cliphub.agent.plist ~/Library/LaunchAgents/
+# Edit the CLIPHUB_HUB env var, or rely on auto-discovery
+launchctl load ~/Library/LaunchAgents/com.cliphub.agent.plist
+```
+
 ## Configuration
 
 | Env var | Flag | Default | Description |
 |---------|------|---------|-------------|
-| `CLIPHUB_HUB` | `--hub` | `http://localhost:8080` | Hub URL (for clipd/tailclip) |
+| `CLIPHUB_HUB` | `--hub` | auto-discovered | Hub URL (for clipd/tailclip) |
 | `CLIPHUB_MAX_HISTORY` | `--max-history` | `50` | Max history items |
 | `CLIPHUB_TTL` | `--ttl` | `24h` | Item TTL |
 

@@ -9,13 +9,38 @@ import (
 	"time"
 
 	"github.com/thalys/cliphub/internal/agent"
+	"github.com/thalys/cliphub/internal/discover"
 )
 
 func main() {
-	hubURL := flag.String("hub", envOr("CLIPHUB_HUB", "http://localhost:8080"), "hub URL")
-	nodeName := flag.String("node", hostname(), "this node's name")
+	hubURL := flag.String("hub", "", "hub URL (auto-discovered from tailnet if empty)")
+	nodeName := flag.String("node", "", "this node's name (auto-discovered from tailscale if empty)")
 	pollMs := flag.Int("poll", 500, "clipboard poll interval in milliseconds")
 	flag.Parse()
+
+	if *hubURL == "" {
+		*hubURL = os.Getenv("CLIPHUB_HUB")
+	}
+	if *hubURL == "" {
+		url, err := discover.HubURL()
+		if err != nil {
+			slog.Warn("hub auto-discovery failed, falling back to localhost", "err", err)
+			*hubURL = "http://localhost:8080"
+		} else {
+			slog.Info("discovered hub", "url", url)
+			*hubURL = url
+		}
+	}
+
+	if *nodeName == "" {
+		name, err := discover.SelfName()
+		if err != nil {
+			h, _ := os.Hostname()
+			*nodeName = h
+		} else {
+			*nodeName = name
+		}
+	}
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -30,19 +55,4 @@ func main() {
 		slog.Error("clipd exited", "err", err)
 		os.Exit(1)
 	}
-}
-
-func hostname() string {
-	h, err := os.Hostname()
-	if err != nil {
-		return "unknown"
-	}
-	return h
-}
-
-func envOr(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
 }

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/thalys/cliphub/internal/discover"
 	"github.com/thalys/cliphub/internal/protocol"
 )
 
@@ -18,7 +19,11 @@ var hubURL string
 func main() {
 	hubURL = os.Getenv("CLIPHUB_HUB")
 	if hubURL == "" {
-		hubURL = "http://localhost:8080"
+		if url, err := discover.HubURL(); err == nil {
+			hubURL = url
+		} else {
+			hubURL = "http://localhost:8080"
+		}
 	}
 
 	// Allow --hub flag anywhere.
