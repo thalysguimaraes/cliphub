@@ -12,15 +12,16 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/thalys/cliphub/internal/clipboard"
 	"github.com/thalys/cliphub/internal/protocol"
 )
 
 // Config holds agent configuration.
 type Config struct {
-	HubURL       string        // Base URL of the hub (e.g. https://cliphub.tailnet.ts.net)
-	NodeName     string        // This node's name.
-	PollInterval time.Duration // Clipboard poll interval.
-	Clipboard    Clipboard     // Clipboard backend (nil = system).
+	HubURL       string              // Base URL of the hub.
+	NodeName     string              // This node's name.
+	PollInterval time.Duration       // Clipboard poll interval.
+	Clipboard    clipboard.Clipboard // Clipboard backend (nil = system default).
 }
 
 // Agent is the local clipboard sync agent.
@@ -31,14 +32,19 @@ type Agent struct {
 	monitor      *ClipboardMonitor
 	client       *http.Client
 	paused       atomic.Bool
-	bootstrapped atomic.Bool // True after first successful bootstrap.
+	bootstrapped atomic.Bool
 }
 
 // New creates an Agent.
 func New(cfg Config) *Agent {
 	clip := cfg.Clipboard
 	if clip == nil {
-		clip = SystemClipboard{}
+		c, err := clipboard.New()
+		if err != nil {
+			slog.Error("clipboard init failed", "err", err)
+			os.Exit(1)
+		}
+		clip = c
 	}
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 500 * time.Millisecond
@@ -53,7 +59,6 @@ func New(cfg Config) *Agent {
 }
 
 // Run starts the clipboard poll loop and WebSocket listener.
-// Blocks until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
 	wsURL := a.hubURL + "/api/clip/stream"
 	if len(wsURL) > 4 && wsURL[:5] == "https" {
@@ -65,8 +70,6 @@ func (a *Agent) Run(ctx context.Context) error {
 	ws := &WSClient{
 		URL: wsURL,
 		OnConnected: func() {
-			// Fetch current clip from hub to avoid clobbering newer hub state
-			// with stale local clipboard on startup or after reconnect.
 			a.bootstrap(ctx)
 		},
 		OnUpdate: func(item protocol.ClipItem) {
@@ -89,14 +92,12 @@ func (a *Agent) Run(ctx context.Context) error {
 			if a.paused.Load() || a.isPausedByFile() {
 				continue
 			}
-			// Don't send local clips until we've bootstrapped from the hub,
-			// otherwise a stale local clipboard overwrites newer hub state.
 			if !a.bootstrapped.Load() {
 				continue
 			}
-			result, content := a.monitor.Poll()
+			result, ct := a.monitor.Poll()
 			if result == PollNewContent {
-				if err := a.sendToHub(ctx, content); err != nil {
+				if err := a.sendToHub(ctx, ct); err != nil {
 					slog.Error("failed to send clip to hub", "err", err)
 				}
 			}
@@ -104,13 +105,11 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
-// bootstrap fetches the current clip from the hub and applies it locally.
-// This ensures we don't clobber newer hub state with stale local content.
 func (a *Agent) bootstrap(ctx context.Context) {
 	req, err := http.NewRequestWithContext(ctx, "GET", a.hubURL+"/api/clip", nil)
 	if err != nil {
 		slog.Error("bootstrap: build request failed", "err", err)
-		a.bootstrapped.Store(true) // Don't block forever on failure.
+		a.bootstrapped.Store(true)
 		return
 	}
 
@@ -136,7 +135,7 @@ func (a *Agent) bootstrap(ctx context.Context) {
 	}
 
 	a.applyRemote(item)
-	slog.Info("bootstrap: applied hub clip", "seq", item.Seq, "source", item.Source)
+	slog.Info("bootstrap: applied hub clip", "seq", item.Seq, "source", item.Source, "mime", item.MimeType)
 	a.bootstrapped.Store(true)
 }
 
@@ -148,15 +147,24 @@ func (a *Agent) applyRemote(item protocol.ClipItem) {
 		slog.Debug("ignoring own update", "seq", item.Seq)
 		return
 	}
-	if err := a.monitor.ApplyRemote(item.Content); err != nil {
+
+	ct := itemToContent(item)
+	if err := a.monitor.ApplyRemote(ct); err != nil {
 		slog.Error("failed to apply remote clip", "err", err)
 	} else {
-		slog.Info("applied remote clip", "seq", item.Seq, "source", item.Source)
+		slog.Info("applied remote clip", "seq", item.Seq, "source", item.Source, "mime", item.MimeType)
 	}
 }
 
-func (a *Agent) sendToHub(ctx context.Context, content string) error {
-	body, _ := json.Marshal(map[string]string{"content": content})
+func (a *Agent) sendToHub(ctx context.Context, ct clipboard.Content) error {
+	payload := map[string]any{"mime_type": ct.MimeType}
+	if ct.IsText() {
+		payload["content"] = ct.Text()
+	} else {
+		payload["data"] = ct.Data
+	}
+
+	body, _ := json.Marshal(payload)
 	req, err := http.NewRequestWithContext(ctx, "POST", a.hubURL+"/api/clip", bytes.NewReader(body))
 	if err != nil {
 		return err
@@ -174,7 +182,7 @@ func (a *Agent) sendToHub(ctx context.Context, content string) error {
 		return fmt.Errorf("hub returned %d", resp.StatusCode)
 	}
 
-	slog.Info("sent clip to hub", "len", len(content))
+	slog.Info("sent clip to hub", "mime", ct.MimeType, "len", len(ct.Data))
 	return nil
 }
 
@@ -185,4 +193,11 @@ func (a *Agent) isPausedByFile() bool {
 	}
 	_, err = os.Stat(filepath.Join(home, ".config", "cliphub", "paused"))
 	return err == nil
+}
+
+func itemToContent(item protocol.ClipItem) clipboard.Content {
+	if item.IsText() {
+		return clipboard.Content{MimeType: item.MimeType, Data: []byte(item.Content)}
+	}
+	return clipboard.Content{MimeType: item.MimeType, Data: item.Data}
 }

@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,10 +54,23 @@ func New(cfg Config) *Hub {
 	return h
 }
 
+// PutInput describes a new clipboard item to store.
+type PutInput struct {
+	MimeType string
+	Content  string // For text/* types.
+	Data     []byte // For binary types.
+	Source   string
+}
+
 // Put stores a new clipboard item. Returns the item and true if it was new,
 // or the existing current item and false if it was a duplicate.
-func (h *Hub) Put(content, source string) (protocol.ClipItem, bool) {
-	hash := protocol.HashContent(content)
+func (h *Hub) Put(in PutInput) (protocol.ClipItem, bool) {
+	var hash string
+	if strings.HasPrefix(in.MimeType, "text/") {
+		hash = protocol.HashContent(in.Content)
+	} else {
+		hash = protocol.HashBytes(in.Data)
+	}
 
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -69,9 +83,11 @@ func (h *Hub) Put(content, source string) (protocol.ClipItem, bool) {
 	now := time.Now()
 	item := protocol.ClipItem{
 		Seq:       h.seq,
-		Content:   content,
+		MimeType:  in.MimeType,
+		Content:   in.Content,
+		Data:      in.Data,
 		Hash:      hash,
-		Source:    source,
+		Source:    in.Source,
 		CreatedAt: now,
 		ExpiresAt: now.Add(h.ttl),
 	}

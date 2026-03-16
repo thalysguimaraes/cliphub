@@ -3,7 +3,6 @@ module github.com/thalys/cliphub
 go 1.26.1
 
 require (
-	github.com/atotto/clipboard v0.1.4
 	github.com/coder/websocket v1.8.14
 	tailscale.com v1.96.1
 )

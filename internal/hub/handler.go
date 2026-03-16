@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/coder/websocket"
@@ -14,7 +15,6 @@ import (
 )
 
 // IdentityFunc extracts a node/source name from an HTTP request.
-// In production this uses Tailscale WhoIs; in dev mode it can be a no-op.
 type IdentityFunc func(r *http.Request) string
 
 // Register mounts all API routes on mux.
@@ -27,7 +27,9 @@ func Register(mux *http.ServeMux, h *Hub, identFn IdentityFunc) {
 }
 
 type postClipRequest struct {
-	Content string `json:"content"`
+	Content  string `json:"content,omitempty"`
+	Data     []byte `json:"data,omitempty"`
+	MimeType string `json:"mime_type,omitempty"`
 }
 
 func postClipHandler(h *Hub, identFn IdentityFunc) http.HandlerFunc {
@@ -47,13 +49,31 @@ func postClipHandler(h *Hub, identFn IdentityFunc) http.HandlerFunc {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
-		if req.Content == "" {
-			http.Error(w, "empty content", http.StatusBadRequest)
-			return
+
+		// Default to text/plain for backward compatibility.
+		if req.MimeType == "" {
+			req.MimeType = "text/plain"
+		}
+
+		if strings.HasPrefix(req.MimeType, "text/") {
+			if req.Content == "" {
+				http.Error(w, "empty content", http.StatusBadRequest)
+				return
+			}
+		} else {
+			if len(req.Data) == 0 {
+				http.Error(w, "empty data", http.StatusBadRequest)
+				return
+			}
 		}
 
 		source := identFn(r)
-		item, isNew := h.Put(req.Content, source)
+		item, isNew := h.Put(PutInput{
+			MimeType: req.MimeType,
+			Content:  req.Content,
+			Data:     req.Data,
+			Source:   source,
+		})
 
 		w.Header().Set("Content-Type", "application/json")
 		if isNew {
@@ -62,7 +82,7 @@ func postClipHandler(h *Hub, identFn IdentityFunc) http.HandlerFunc {
 		json.NewEncoder(w).Encode(item)
 
 		if isNew {
-			slog.Info("clip stored", "seq", item.Seq, "source", source, "len", len(req.Content))
+			slog.Info("clip stored", "seq", item.Seq, "source", source, "mime", item.MimeType, "len", len(item.RawBytes()))
 		}
 	}
 }

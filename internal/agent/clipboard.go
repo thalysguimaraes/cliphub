@@ -3,32 +3,20 @@ package agent
 import (
 	"sync"
 
-	"github.com/atotto/clipboard"
+	"github.com/thalys/cliphub/internal/clipboard"
 	"github.com/thalys/cliphub/internal/protocol"
 )
-
-// Clipboard abstracts clipboard access for testability.
-type Clipboard interface {
-	ReadAll() (string, error)
-	WriteAll(string) error
-}
-
-// SystemClipboard wraps the OS clipboard.
-type SystemClipboard struct{}
-
-func (SystemClipboard) ReadAll() (string, error) { return clipboard.ReadAll() }
-func (SystemClipboard) WriteAll(s string) error   { return clipboard.WriteAll(s) }
 
 // ClipboardMonitor tracks clipboard state and prevents feedback loops.
 type ClipboardMonitor struct {
 	mu              sync.Mutex
 	lastWrittenHash string // Hash of the last item we wrote (from remote).
 	lastSeenHash    string // Hash of the last item we read from clipboard.
-	clip            Clipboard
+	clip            clipboard.Clipboard
 }
 
 // NewClipboardMonitor creates a monitor with the given clipboard backend.
-func NewClipboardMonitor(clip Clipboard) *ClipboardMonitor {
+func NewClipboardMonitor(clip clipboard.Clipboard) *ClipboardMonitor {
 	return &ClipboardMonitor{clip: clip}
 }
 
@@ -36,56 +24,69 @@ func NewClipboardMonitor(clip Clipboard) *ClipboardMonitor {
 type PollResult int
 
 const (
-	PollNoChange      PollResult = iota // Clipboard unchanged.
-	PollOwnWrite                        // We wrote this ourselves (remote update echo).
-	PollNewContent                      // Genuine new local content.
-	PollError                           // Error reading clipboard.
+	PollNoChange  PollResult = iota // Clipboard unchanged.
+	PollOwnWrite                    // We wrote this ourselves (remote update echo).
+	PollNewContent                  // Genuine new local content.
+	PollError                       // Error reading clipboard.
 )
 
 // Poll reads the clipboard and returns what happened plus the content if new.
-func (m *ClipboardMonitor) Poll() (PollResult, string) {
+func (m *ClipboardMonitor) Poll() (PollResult, clipboard.Content) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	content, err := m.clip.ReadAll()
+	ct, err := m.clip.ReadBest()
 	if err != nil {
-		return PollError, ""
+		return PollError, clipboard.Content{}
 	}
-	if content == "" {
-		return PollNoChange, ""
+	if ct.Empty() {
+		return PollNoChange, clipboard.Content{}
 	}
 
-	hash := protocol.HashContent(content)
+	hash := protocol.HashBytes(ct.Data)
 
 	if hash == m.lastSeenHash {
-		return PollNoChange, ""
+		return PollNoChange, clipboard.Content{}
 	}
 
 	m.lastSeenHash = hash
 
 	if hash == m.lastWrittenHash {
-		return PollOwnWrite, ""
+		return PollOwnWrite, clipboard.Content{}
 	}
 
-	return PollNewContent, content
+	return PollNewContent, ct
 }
 
 // ApplyRemote writes a remote clipboard item to the local clipboard.
-// Returns an error if the write fails.
-func (m *ClipboardMonitor) ApplyRemote(content string) error {
-	hash := protocol.HashContent(content)
+// After writing, it reads back the clipboard to capture any format conversion
+// the platform may have done, ensuring the next poll won't see a false change.
+func (m *ClipboardMonitor) ApplyRemote(ct clipboard.Content) error {
+	hash := protocol.HashBytes(ct.Data)
 
 	m.mu.Lock()
 	m.lastWrittenHash = hash
 	m.mu.Unlock()
 
-	if err := m.clip.WriteAll(content); err != nil {
+	if err := m.clip.Write(ct); err != nil {
 		return err
 	}
 
-	m.mu.Lock()
-	m.lastSeenHash = hash
-	m.mu.Unlock()
+	// Read back what the platform actually stored. If it converted the format
+	// (e.g., we wrote HTML but it reads back as plain text), update our hashes
+	// to match the read-back so the next poll doesn't see a false new content.
+	readBack, err := m.clip.ReadBest()
+	if err == nil && !readBack.Empty() {
+		readBackHash := protocol.HashBytes(readBack.Data)
+		m.mu.Lock()
+		m.lastSeenHash = readBackHash
+		m.lastWrittenHash = readBackHash
+		m.mu.Unlock()
+	} else {
+		m.mu.Lock()
+		m.lastSeenHash = hash
+		m.mu.Unlock()
+	}
 
 	return nil
 }
