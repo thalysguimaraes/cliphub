@@ -6,7 +6,7 @@ options:
   xcodeVersion: "16.0"
 
 settings:
-  SWIFT_VERSION: "6.0"
+  SWIFT_VERSION: "5"
   DEVELOPMENT_TEAM: ""  # Set your Apple Developer Team ID here
 
 targets:
@@ -18,11 +18,6 @@ targets:
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: com.thalys.cliphub.kit
       INFOPLIST_FILE: ClipHubKit/Info.plist
-    entitlements:
-      path: ClipHub/ClipHub.entitlements
-      properties:
-        com.apple.security.application-groups:
-          - group.com.thalys.cliphub
 
   ClipHub:
     type: application
