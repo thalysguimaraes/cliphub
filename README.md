@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="assets/logo.svg" width="128" height="128" alt="ClipHub">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thalysguimaraes/cliphub/main/assets/logo.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/thalysguimaraes/cliphub/main/assets/logo.svg">
+    <img src="https://raw.githubusercontent.com/thalysguimaraes/cliphub/main/assets/logo.svg" width="128" height="128" alt="ClipHub">
+  </picture>
 </p>
 
 <h1 align="center">ClipHub</h1>
