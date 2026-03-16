@@ -1,5 +1,6 @@
 import UIKit
 import SwiftUI
+import ClipHubKit
 
 class KeyboardViewController: UIInputViewController {
     private var hostingController: UIHostingController<TailPasteView>?
@@ -8,8 +9,8 @@ class KeyboardViewController: UIInputViewController {
         super.viewDidLoad()
 
         let vm = KeyboardViewModel(proxy: textDocumentProxy)
-        let view = TailPasteView(viewModel: vm)
-        let host = UIHostingController(rootView: view)
+        let tailPasteView = TailPasteView(viewModel: vm)
+        let host = UIHostingController(rootView: tailPasteView)
         host.view.translatesAutoresizingMaskIntoConstraints = false
         host.view.backgroundColor = .clear
 
@@ -18,10 +19,10 @@ class KeyboardViewController: UIInputViewController {
         host.didMove(toParent: self)
 
         NSLayoutConstraint.activate([
-            host.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            host.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            host.view.topAnchor.constraint(equalTo: view.topAnchor),
-            host.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            host.view.leadingAnchor.constraint(equalTo: self.view.leadingAnchor),
+            host.view.trailingAnchor.constraint(equalTo: self.view.trailingAnchor),
+            host.view.topAnchor.constraint(equalTo: self.view.topAnchor),
+            host.view.bottomAnchor.constraint(equalTo: self.view.bottomAnchor),
         ])
 
         self.hostingController = host
@@ -29,9 +30,6 @@ class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
-        // Trigger refresh when keyboard opens.
-        if let host = hostingController {
-            host.rootView.viewModel.refresh()
-        }
+        hostingController?.rootView.viewModel.refresh()
     }
 }
