@@ -1,13 +1,13 @@
 package main
 
 import (
-	"crypto/tls"
 	"flag"
 	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -16,8 +16,9 @@ import (
 )
 
 func main() {
-	dev := flag.Bool("dev", false, "development mode: listen on localhost:8080 without tsnet")
+	dev := flag.Bool("dev", false, "development mode: listen on localhost without tsnet")
 	addr := flag.String("addr", "localhost:8080", "listen address in dev mode")
+	stateDir := flag.String("state-dir", defaultStateDir(), "tsnet state directory")
 	maxHistory := flag.Int("max-history", envInt("CLIPHUB_MAX_HISTORY", 50), "max history items")
 	ttl := flag.Duration("ttl", envDuration("CLIPHUB_TTL", 24*time.Hour), "item TTL")
 	flag.Parse()
@@ -47,15 +48,28 @@ func main() {
 		}
 		slog.Info("cliphub dev mode", "addr", *addr)
 	} else {
+		if err := os.MkdirAll(*stateDir, 0o700); err != nil {
+			slog.Error("create state dir failed", "err", err, "dir", *stateDir)
+			os.Exit(1)
+		}
+
 		srv := &tsnet.Server{
 			Hostname: "cliphub",
+			Dir:      *stateDir,
 		}
 		defer srv.Close()
 
+		// Try TLS first (requires HTTPS enabled in Tailscale admin).
+		// Fall back to plain HTTP if HTTPS is not configured.
 		ln, err = srv.ListenTLS("tcp", ":443")
 		if err != nil {
-			slog.Error("tsnet listen failed", "err", err)
-			os.Exit(1)
+			slog.Warn("TLS listen failed, falling back to plain HTTP", "err", err)
+			ln, err = srv.Listen("tcp", ":80")
+			if err != nil {
+				slog.Error("tsnet listen failed", "err", err)
+				os.Exit(1)
+			}
+			slog.Info("cliphub listening on tailnet (plain HTTP)", "hostname", "cliphub")
 		}
 
 		lc, err := srv.LocalClient()
@@ -72,13 +86,12 @@ func main() {
 			return who.Node.ComputedName
 		})
 
-		slog.Info("cliphub listening on tailnet", "hostname", "cliphub")
+		slog.Info("cliphub listening on tailnet", "hostname", "cliphub", "state_dir", *stateDir)
 	}
 
 	server := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
-		TLSConfig:         &tls.Config{MinVersion: tls.VersionTLS12},
 	}
 
 	go func() {
@@ -93,6 +106,13 @@ func main() {
 		slog.Error("server error", "err", err)
 		os.Exit(1)
 	}
+}
+
+func defaultStateDir() string {
+	if d, err := os.UserConfigDir(); err == nil {
+		return filepath.Join(d, "cliphub", "tsnet")
+	}
+	return "/var/lib/cliphub/tsnet"
 }
 
 func envInt(key string, fallback int) int {
