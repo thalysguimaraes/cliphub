@@ -70,7 +70,9 @@ func (a *Agent) Run(ctx context.Context) error {
 	ws := &WSClient{
 		URL: wsURL,
 		OnConnected: func() {
-			a.bootstrap(ctx)
+			if !a.bootstrapped.Load() {
+				a.bootstrap(ctx)
+			}
 		},
 		OnUpdate: func(item protocol.ClipItem) {
 			a.applyRemote(item)

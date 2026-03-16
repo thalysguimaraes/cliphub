@@ -123,8 +123,31 @@ func streamHandler(h *Hub) http.HandlerFunc {
 		defer conn.CloseNow()
 
 		ctx := r.Context()
+
+		// Subscribe first so we don't miss items arriving during catch-up.
 		sub := h.Subscribe(ctx)
 		defer sub.cancel()
+
+		// Catch-up replay: send items missed since the given seq.
+		var replayedUpTo uint64
+		if s := r.URL.Query().Get("since_seq"); s != "" {
+			if sinceSeq, err := strconv.ParseUint(s, 10, 64); err == nil {
+				missed := h.Since(sinceSeq)
+				for _, item := range missed {
+					msg := protocol.WSMessage{Type: "clip_update", Item: &item}
+					if err := wsjson.Write(ctx, conn, msg); err != nil {
+						slog.Debug("websocket catch-up write failed", "err", err)
+						return
+					}
+					if item.Seq > replayedUpTo {
+						replayedUpTo = item.Seq
+					}
+				}
+				if len(missed) > 0 {
+					slog.Info("catch-up replay", "since_seq", sinceSeq, "replayed", len(missed))
+				}
+			}
+		}
 
 		slog.Info("subscriber connected", "remote", r.RemoteAddr)
 
@@ -134,6 +157,9 @@ func streamHandler(h *Hub) http.HandlerFunc {
 				conn.Close(websocket.StatusNormalClosure, "bye")
 				return
 			case item := <-sub.C:
+				if item.Seq <= replayedUpTo {
+					continue // Already sent during catch-up.
+				}
 				msg := protocol.WSMessage{Type: "clip_update", Item: &item}
 				if err := wsjson.Write(ctx, conn, msg); err != nil {
 					slog.Debug("websocket write failed", "err", err)

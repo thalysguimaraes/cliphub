@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 type Config struct {
 	MaxHistory int
 	TTL        time.Duration
+	DBPath     string // Empty = no persistence.
 }
 
 // Subscriber receives clipboard updates via a channel.
@@ -31,13 +33,14 @@ type Hub struct {
 	seq        uint64
 	ttl        time.Duration
 	startedAt  time.Time
+	store      *Store // nil if no persistence.
 
 	subsMu sync.RWMutex
 	subs   map[*Subscriber]struct{}
 }
 
-// New creates a Hub and starts the TTL reaper.
-func New(cfg Config) *Hub {
+// New creates a Hub, optionally backed by SQLite, and starts the TTL reaper.
+func New(cfg Config) (*Hub, error) {
 	if cfg.MaxHistory <= 0 {
 		cfg.MaxHistory = 50
 	}
@@ -50,8 +53,36 @@ func New(cfg Config) *Hub {
 		subs:       make(map[*Subscriber]struct{}),
 		startedAt:  time.Now(),
 	}
+
+	if cfg.DBPath != "" {
+		st, err := OpenStore(cfg.DBPath)
+		if err != nil {
+			return nil, fmt.Errorf("open clip store: %w", err)
+		}
+		h.store = st
+		seq, items, err := st.LoadState(cfg.MaxHistory)
+		if err != nil {
+			st.Close()
+			return nil, fmt.Errorf("load clip state: %w", err)
+		}
+		h.seq = seq
+		h.history = items
+		if len(items) > 0 {
+			h.current = &items[0]
+		}
+		slog.Info("loaded state from db", "seq", seq, "items", len(items))
+	}
+
 	go h.reapLoop()
-	return h
+	return h, nil
+}
+
+// Close shuts down the hub's persistent store.
+func (h *Hub) Close() error {
+	if h.store != nil {
+		return h.store.Close()
+	}
+	return nil
 }
 
 // PutInput describes a new clipboard item to store.
@@ -104,10 +135,16 @@ func (h *Hub) Put(in PutInput) (protocol.ClipItem, bool) {
 		select {
 		case sub.C <- item:
 		default:
-			// Slow subscriber, drop update.
 		}
 	}
 	h.subsMu.RUnlock()
+
+	// Persist to SQLite.
+	if h.store != nil {
+		if err := h.store.SaveItem(item); err != nil {
+			slog.Error("failed to persist clip", "seq", item.Seq, "err", err)
+		}
+	}
 
 	return item, true
 }
@@ -129,6 +166,20 @@ func (h *Hub) History(limit int) []protocol.ClipItem {
 	}
 	out := make([]protocol.ClipItem, limit)
 	copy(out, h.history[:limit])
+	return out
+}
+
+// Since returns all items in history with seq > afterSeq, in chronological order.
+func (h *Hub) Since(afterSeq uint64) []protocol.ClipItem {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	var out []protocol.ClipItem
+	for i := len(h.history) - 1; i >= 0; i-- {
+		if h.history[i].Seq > afterSeq {
+			out = append(out, h.history[i])
+		}
+	}
 	return out
 }
 
@@ -205,4 +256,14 @@ func (h *Hub) reapExpired() {
 		slog.Info("reaped expired clips", "count", reaped)
 	}
 	h.history = kept
+
+	if h.store != nil {
+		go func() {
+			if n, err := h.store.DeleteExpired(now); err != nil {
+				slog.Error("failed to delete expired from db", "err", err)
+			} else if n > 0 {
+				slog.Info("reaped expired clips from db", "count", n)
+			}
+		}()
+	}
 }

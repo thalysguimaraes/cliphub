@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -14,7 +15,8 @@ import (
 type WSClient struct {
 	URL         string
 	OnUpdate    func(protocol.ClipItem)
-	OnConnected func() // Called on each (re)connect so the agent can bootstrap.
+	OnConnected func() // Called on first connect only.
+	lastSeq     uint64 // Tracks last seq received for reconnect catch-up.
 }
 
 // Run connects to the hub and reads updates until ctx is cancelled.
@@ -41,13 +43,18 @@ func (c *WSClient) Run(ctx context.Context) {
 }
 
 func (c *WSClient) connect(ctx context.Context) error {
-	conn, _, err := websocket.Dial(ctx, c.URL, nil)
+	url := c.URL
+	if c.lastSeq > 0 {
+		url += fmt.Sprintf("?since_seq=%d", c.lastSeq)
+	}
+
+	conn, _, err := websocket.Dial(ctx, url, nil)
 	if err != nil {
 		return err
 	}
 	defer conn.CloseNow()
 
-	slog.Info("connected to hub", "url", c.URL)
+	slog.Info("connected to hub", "url", url)
 
 	if c.OnConnected != nil {
 		c.OnConnected()
@@ -59,6 +66,7 @@ func (c *WSClient) connect(ctx context.Context) error {
 			return err
 		}
 		if msg.Type == "clip_update" && msg.Item != nil {
+			c.lastSeq = msg.Item.Seq
 			c.OnUpdate(*msg.Item)
 		}
 	}

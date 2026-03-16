@@ -23,15 +23,29 @@ func main() {
 	ttl := flag.Duration("ttl", envDuration("CLIPHUB_TTL", 24*time.Hour), "item TTL")
 	flag.Parse()
 
-	h := hub.New(hub.Config{
+	dbPath := ""
+	if !*dev {
+		if err := os.MkdirAll(*stateDir, 0o700); err != nil {
+			slog.Error("create state dir failed", "err", err, "dir", *stateDir)
+			os.Exit(1)
+		}
+		dbPath = filepath.Join(*stateDir, "clips.db")
+	}
+
+	h, err := hub.New(hub.Config{
 		MaxHistory: *maxHistory,
 		TTL:        *ttl,
+		DBPath:     dbPath,
 	})
+	if err != nil {
+		slog.Error("hub init failed", "err", err)
+		os.Exit(1)
+	}
+	defer h.Close()
 
 	mux := http.NewServeMux()
 
 	var ln net.Listener
-	var err error
 
 	if *dev {
 		hub.Register(mux, h, func(r *http.Request) string {
@@ -48,11 +62,6 @@ func main() {
 		}
 		slog.Info("cliphub dev mode", "addr", *addr)
 	} else {
-		if err := os.MkdirAll(*stateDir, 0o700); err != nil {
-			slog.Error("create state dir failed", "err", err, "dir", *stateDir)
-			os.Exit(1)
-		}
-
 		srv := &tsnet.Server{
 			Hostname: "cliphub",
 			Dir:      *stateDir,
