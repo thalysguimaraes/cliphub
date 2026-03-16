@@ -31,6 +31,7 @@ type Agent struct {
 	monitor      *ClipboardMonitor
 	client       *http.Client
 	paused       atomic.Bool
+	bootstrapped atomic.Bool // True after first successful bootstrap.
 }
 
 // New creates an Agent.
@@ -54,9 +55,7 @@ func New(cfg Config) *Agent {
 // Run starts the clipboard poll loop and WebSocket listener.
 // Blocks until ctx is cancelled.
 func (a *Agent) Run(ctx context.Context) error {
-	// Start WebSocket listener.
 	wsURL := a.hubURL + "/api/clip/stream"
-	// Replace http(s) with ws(s) for WebSocket.
 	if len(wsURL) > 4 && wsURL[:5] == "https" {
 		wsURL = "wss" + wsURL[5:]
 	} else if len(wsURL) > 3 && wsURL[:4] == "http" {
@@ -65,25 +64,18 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	ws := &WSClient{
 		URL: wsURL,
+		OnConnected: func() {
+			// Fetch current clip from hub to avoid clobbering newer hub state
+			// with stale local clipboard on startup or after reconnect.
+			a.bootstrap(ctx)
+		},
 		OnUpdate: func(item protocol.ClipItem) {
-			if a.paused.Load() {
-				return
-			}
-			if item.Source == a.nodeName {
-				slog.Debug("ignoring own update", "seq", item.Seq)
-				return
-			}
-			if err := a.monitor.ApplyRemote(item.Content); err != nil {
-				slog.Error("failed to apply remote clip", "err", err)
-			} else {
-				slog.Info("applied remote clip", "seq", item.Seq, "source", item.Source)
-			}
+			a.applyRemote(item)
 		},
 	}
 
 	go ws.Run(ctx)
 
-	// Clipboard poll loop.
 	ticker := time.NewTicker(a.pollInterval)
 	defer ticker.Stop()
 
@@ -97,6 +89,11 @@ func (a *Agent) Run(ctx context.Context) error {
 			if a.paused.Load() || a.isPausedByFile() {
 				continue
 			}
+			// Don't send local clips until we've bootstrapped from the hub,
+			// otherwise a stale local clipboard overwrites newer hub state.
+			if !a.bootstrapped.Load() {
+				continue
+			}
 			result, content := a.monitor.Poll()
 			if result == PollNewContent {
 				if err := a.sendToHub(ctx, content); err != nil {
@@ -104,6 +101,57 @@ func (a *Agent) Run(ctx context.Context) error {
 				}
 			}
 		}
+	}
+}
+
+// bootstrap fetches the current clip from the hub and applies it locally.
+// This ensures we don't clobber newer hub state with stale local content.
+func (a *Agent) bootstrap(ctx context.Context) {
+	req, err := http.NewRequestWithContext(ctx, "GET", a.hubURL+"/api/clip", nil)
+	if err != nil {
+		slog.Error("bootstrap: build request failed", "err", err)
+		a.bootstrapped.Store(true) // Don't block forever on failure.
+		return
+	}
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		slog.Warn("bootstrap: fetch failed, will sync from local clipboard", "err", err)
+		a.bootstrapped.Store(true)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent {
+		slog.Info("bootstrap: hub has no current clip")
+		a.bootstrapped.Store(true)
+		return
+	}
+
+	var item protocol.ClipItem
+	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
+		slog.Warn("bootstrap: decode failed", "err", err)
+		a.bootstrapped.Store(true)
+		return
+	}
+
+	a.applyRemote(item)
+	slog.Info("bootstrap: applied hub clip", "seq", item.Seq, "source", item.Source)
+	a.bootstrapped.Store(true)
+}
+
+func (a *Agent) applyRemote(item protocol.ClipItem) {
+	if a.paused.Load() {
+		return
+	}
+	if item.Source == a.nodeName {
+		slog.Debug("ignoring own update", "seq", item.Seq)
+		return
+	}
+	if err := a.monitor.ApplyRemote(item.Content); err != nil {
+		slog.Error("failed to apply remote clip", "err", err)
+	} else {
+		slog.Info("applied remote clip", "seq", item.Seq, "source", item.Source)
 	}
 }
 

@@ -1,0 +1,16 @@
+[Unit]
+Description=ClipHub - Clipboard sync hub
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/cliphub
+Restart=on-failure
+RestartSec=5
+StateDirectory=cliphub
+Environment=CLIPHUB_MAX_HISTORY=50
+Environment=CLIPHUB_TTL=24h
+
+[Install]
+WantedBy=multi-user.target

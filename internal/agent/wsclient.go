@@ -12,8 +12,9 @@ import (
 
 // WSClient connects to the hub's WebSocket stream and delivers updates.
 type WSClient struct {
-	URL      string
-	OnUpdate func(protocol.ClipItem)
+	URL         string
+	OnUpdate    func(protocol.ClipItem)
+	OnConnected func() // Called on each (re)connect so the agent can bootstrap.
 }
 
 // Run connects to the hub and reads updates until ctx is cancelled.
@@ -35,7 +36,7 @@ func (c *WSClient) Run(ctx context.Context) {
 			backoff = min(backoff*2, 60*time.Second)
 			continue
 		}
-		backoff = time.Second // Reset on successful connection.
+		backoff = time.Second
 	}
 }
 
@@ -47,6 +48,10 @@ func (c *WSClient) connect(ctx context.Context) error {
 	defer conn.CloseNow()
 
 	slog.Info("connected to hub", "url", c.URL)
+
+	if c.OnConnected != nil {
+		c.OnConnected()
+	}
 
 	for {
 		var msg protocol.WSMessage

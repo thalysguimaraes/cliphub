@@ -95,9 +95,7 @@ func historyHandler(h *Hub) http.HandlerFunc {
 
 func streamHandler(h *Hub) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			InsecureSkipVerify: true, // Tailscale handles auth.
-		})
+		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
 			slog.Error("websocket accept failed", "err", err)
 			return

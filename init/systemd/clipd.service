@@ -1,0 +1,14 @@
+[Unit]
+Description=ClipHub - Clipboard sync agent
+After=network-online.target tailscaled.service graphical-session.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/clipd
+Restart=on-failure
+RestartSec=5
+Environment=CLIPHUB_HUB=https://cliphub.your-tailnet.ts.net
+
+[Install]
+WantedBy=default.target

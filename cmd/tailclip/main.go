@@ -93,6 +93,9 @@ func cmdGet() error {
 		fmt.Fprintln(os.Stderr, "(clipboard empty)")
 		return nil
 	}
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("hub returned %d", resp.StatusCode)
+	}
 
 	var item protocol.ClipItem
 	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
@@ -125,8 +128,15 @@ func cmdPut(args []string) error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 400 {
+		msg, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("hub: %s (%d)", strings.TrimSpace(string(msg)), resp.StatusCode)
+	}
+
 	var item protocol.ClipItem
-	json.NewDecoder(resp.Body).Decode(&item)
+	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
 	fmt.Fprintf(os.Stderr, "stored (seq=%d, %d bytes)\n", item.Seq, len(content))
 	return nil
 }
@@ -145,6 +155,10 @@ func cmdHistory(args []string) error {
 		return err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("hub returned %d", resp.StatusCode)
+	}
 
 	var items []protocol.ClipItem
 	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
@@ -170,8 +184,14 @@ func cmdStatus() error {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("hub returned %d", resp.StatusCode)
+	}
+
 	var status map[string]any
-	json.NewDecoder(resp.Body).Decode(&status)
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return fmt.Errorf("decode response: %w", err)
+	}
 
 	for k, v := range status {
 		fmt.Printf("%-12s %v\n", k+":", v)

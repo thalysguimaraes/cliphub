@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"time"
 
 	"github.com/thalys/cliphub/internal/hub"
@@ -96,8 +97,8 @@ func main() {
 
 func envInt(key string, fallback int) int {
 	if v, ok := os.LookupEnv(key); ok {
-		if n, err := time.ParseDuration(v); err == nil {
-			return int(n)
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
 		}
 	}
 	return fallback
