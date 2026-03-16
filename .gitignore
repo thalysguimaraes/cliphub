@@ -1,0 +1,4 @@
+bin/
+*.exe
+*_test.go
+test_e2e.sh
