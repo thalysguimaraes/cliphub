@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -12,11 +14,24 @@ import (
 	"github.com/thalysguimaraes/cliphub/internal/discover"
 )
 
-func main() {
-	hubURL := flag.String("hub", "", "hub URL (auto-discovered from tailnet if empty)")
-	nodeName := flag.String("node", "", "this node's name (auto-discovered from tailscale if empty)")
-	pollMs := flag.Int("poll", 500, "clipboard poll interval in milliseconds")
-	flag.Parse()
+type agentRunner interface {
+	Run(context.Context) error
+}
+
+var newAgent = func(cfg agent.Config) (agentRunner, error) {
+	return agent.New(cfg)
+}
+
+func run(ctx context.Context, args []string) error {
+	fs := flag.NewFlagSet("clipd", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+
+	hubURL := fs.String("hub", "", "hub URL (auto-discovered from tailnet if empty)")
+	nodeName := fs.String("node", "", "this node's name (auto-discovered from tailscale if empty)")
+	pollMs := fs.Int("poll", 500, "clipboard poll interval in milliseconds")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
 
 	if *hubURL == "" {
 		*hubURL = os.Getenv("CLIPHUB_HUB")
@@ -42,17 +57,34 @@ func main() {
 		}
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
-	defer cancel()
-
-	a := agent.New(agent.Config{
+	a, err := newAgent(agent.Config{
 		HubURL:       *hubURL,
 		NodeName:     *nodeName,
 		PollInterval: time.Duration(*pollMs) * time.Millisecond,
 	})
-
-	if err := a.Run(ctx); err != nil && err != context.Canceled {
-		slog.Error("clipd exited", "err", err)
-		os.Exit(1)
+	if err != nil {
+		return err
 	}
+
+	return a.Run(ctx)
+}
+
+func runMain(args []string) int {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
+
+	if err := run(ctx, args); err != nil && err != context.Canceled {
+		var initErr *agent.ClipboardInitError
+		if errors.As(err, &initErr) {
+			slog.Error("clipboard init failed", "err", initErr.Err)
+		} else {
+			slog.Error("clipd exited", "err", err)
+		}
+		return 1
+	}
+	return 0
+}
+
+func main() {
+	os.Exit(runMain(os.Args[1:]))
 }

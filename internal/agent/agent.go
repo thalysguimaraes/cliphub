@@ -35,14 +35,34 @@ type Agent struct {
 	bootstrapped atomic.Bool
 }
 
+// ClipboardInitError reports a failure to initialize the default clipboard backend.
+type ClipboardInitError struct {
+	Err error
+}
+
+func (e *ClipboardInitError) Error() string {
+	if e == nil || e.Err == nil {
+		return "clipboard init failed"
+	}
+	return e.Err.Error()
+}
+
+func (e *ClipboardInitError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+var newClipboard = clipboard.New
+
 // New creates an Agent.
-func New(cfg Config) *Agent {
+func New(cfg Config) (*Agent, error) {
 	clip := cfg.Clipboard
 	if clip == nil {
-		c, err := clipboard.New()
+		c, err := newClipboard()
 		if err != nil {
-			slog.Error("clipboard init failed", "err", err)
-			os.Exit(1)
+			return nil, &ClipboardInitError{Err: err}
 		}
 		clip = c
 	}
@@ -55,7 +75,7 @@ func New(cfg Config) *Agent {
 		pollInterval: cfg.PollInterval,
 		monitor:      NewClipboardMonitor(clip),
 		client:       &http.Client{Timeout: 10 * time.Second},
-	}
+	}, nil
 }
 
 // Run starts the clipboard poll loop and WebSocket listener.
