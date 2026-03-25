@@ -177,15 +177,104 @@ After writing, the agent reads back the clipboard to handle platform format conv
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `POST` | `/api/clip` | Submit content (`{"content":"...", "mime_type":"text/plain"}` or `{"data":"base64...", "mime_type":"image/png"}`) |
+| `POST` | `/api/clip` | Submit JSON content. Text stays inline as `content`; binary remains supported as base64-in-JSON for compatibility. |
+| `POST` | `/api/clip/blob` | Submit raw request bytes with `Content-Type` set to the clip MIME type. Preferred for large HTML or binary payloads. |
 | `GET` | `/api/clip` | Current item (204 if empty) |
+| `GET` | `/api/clip/blob?seq=N` | Download the current clip or a specific history entry as raw bytes. |
+| `GET` | `/api/clip/history?limit=N` | Compatibility history endpoint (newest first, bare array response). |
+| `GET` | `/api/clip/history/page?limit=N&cursor=SEQ` | Cursor-paged history with lightweight items and `next_cursor` metadata. |
 | `DELETE` | `/api/clip` | Clear current hub clipboard state and persisted history |
-| `GET` | `/api/clip/history?limit=N` | History (newest first) |
 | `GET` | `/api/clip/stream?since_seq=N` | WebSocket: live updates + catch-up replay |
 | `GET` | `/api/status` | Hub status, readiness, and lightweight counters |
 | `GET` | `/healthz` | Liveness check (200 while the process is healthy) |
 | `GET` | `/readyz` | Readiness check (503 while shutting down/draining) |
 | `GET` | `/metrics` | Prometheus-style text metrics for hub activity and lifecycle |
+
+### Large payload flows
+
+The original JSON API still works, but it expands binary payloads because the
+body has to be base64-encoded before it can be embedded in JSON.
+
+Example: a 1 MiB PNG becomes `1,398,104` base64 characters before JSON framing.
+
+Legacy JSON upload:
+
+```bash
+curl -X POST http://localhost:8080/api/clip \
+  -H 'Content-Type: application/json' \
+  -d '{"data":"<base64>","mime_type":"image/png"}'
+```
+
+Preferred raw blob flow:
+
+```bash
+# Upload raw bytes with the real MIME type.
+curl -X POST http://localhost:8080/api/clip/blob \
+  -H 'Content-Type: image/png' \
+  --data-binary @photo.png
+
+# Download the raw bytes back later.
+curl http://localhost:8080/api/clip/blob?seq=123 -o photo.png
+```
+
+The blob endpoint returns lightweight metadata (sequence, hash, size, and a
+download path) so large uploads do not bounce back through another base64 JSON
+response.
+
+### History pagination
+
+Use `/api/clip/history/page` when clients need to walk a large history window
+without pulling the entire response as one array or embedding binary payloads in
+every item.
+
+```bash
+curl 'http://localhost:8080/api/clip/history/page?limit=2'
+```
+
+```json
+{
+  "items": [
+    {
+      "seq": 42,
+      "mime_type": "image/png",
+      "hash": "...",
+      "source": "laptop",
+      "created_at": "2026-03-25T17:00:00Z",
+      "expires_at": "2026-03-26T17:00:00Z",
+      "size_bytes": 2048,
+      "download_path": "/api/clip/blob?seq=42"
+    }
+  ],
+  "next_cursor": "41",
+  "has_more": true
+}
+```
+
+Pass the returned `next_cursor` back as `cursor` to fetch the next page. The
+paged endpoint uses SQLite-backed history when persistence is enabled, so it can
+navigate beyond the in-memory `maxHistory` ring buffer.
+
+### Typed errors
+
+HTTP failures now return a structured JSON envelope that clients can branch on:
+
+```json
+{
+  "error": {
+    "code": "invalid_cursor",
+    "message": "cursor must be a positive integer",
+    "details": {
+      "cursor": "abc"
+    }
+  }
+}
+```
+
+### Go SDK note
+
+First-party Go callers continue to use `internal/hubclient` while the HTTP
+contract settles. A public Go SDK/package decision is intentionally tracked as a
+separate follow-up rather than being bundled into this transport update.
 
 ## Running as a service
 

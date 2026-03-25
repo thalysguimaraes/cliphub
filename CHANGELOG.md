@@ -25,6 +25,7 @@ Suggested headings:
 ### Changed
 
 - `make release` now emits publishable assets under `dist/release`, and `make release-verify` validates checksum and manifest consistency for dry runs and CI.
+- Added raw blob upload/download endpoints, cursor-paged history responses, and typed HTTP error envelopes so large ClipHub API payloads no longer need to rely solely on base64-in-JSON workflows.
 
 ### Security
 
