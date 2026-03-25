@@ -19,6 +19,9 @@ import (
 	"tailscale.com/tsnet"
 )
 
+// version is injected via ldflags in reproducible release builds.
+var version = "dev"
+
 func main() {
 	dev := flag.Bool("dev", false, "development mode: listen on localhost without tsnet")
 	addr := flag.String("addr", "localhost:8080", "listen address in dev mode")

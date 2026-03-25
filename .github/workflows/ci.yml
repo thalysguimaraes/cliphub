@@ -85,5 +85,7 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Cross-build current release targets
-        run: make release
+      - name: Build deterministic release artifacts
+        run: make release VERSION=ci-snapshot
+      - name: Verify release artifacts
+        run: make release-verify VERSION=ci-snapshot

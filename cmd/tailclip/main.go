@@ -19,6 +19,9 @@ import (
 	"github.com/thalysguimaraes/cliphub/internal/hubclient"
 )
 
+// version is injected via ldflags in reproducible release builds.
+var version = "dev"
+
 var hub *hubclient.Client
 
 func main() {

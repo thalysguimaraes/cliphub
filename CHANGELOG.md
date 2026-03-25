@@ -18,11 +18,13 @@ Suggested headings:
 ### Added
 
 - Governance baseline for contributors and maintainers, including contribution, security, and conduct documentation plus GitHub issue and pull request templates.
+- Deterministic release automation that builds publishable archives, writes SHA-256 checksums, generates release notes, and records release metadata for GitHub releases.
 - Opt-in clipboard privacy controls for app/process ignore lists, sensitive-content filtering (`secret`, `password-manager`, `otp`), and explicit `tailclip clear` history wiping.
 - Hub operability endpoints for liveness, readiness, and Prometheus-style metrics, plus reconnect/shutdown integration coverage and a `make test-race` workflow entrypoint.
 
 ### Changed
 
+- `make release` now emits publishable assets under `dist/release`, and `make release-verify` validates checksum and manifest consistency for dry runs and CI.
 - Added raw blob upload/download endpoints, cursor-paged history responses, and typed HTTP error envelopes so large ClipHub API payloads no longer need to rely solely on base64-in-JSON workflows.
 
 ### Security
