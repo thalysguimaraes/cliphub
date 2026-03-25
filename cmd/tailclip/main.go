@@ -1,32 +1,29 @@
 package main
 
 import (
-	"encoding/json"
+	"context"
+	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/thalysguimaraes/cliphub/internal/discover"
-	"github.com/thalysguimaraes/cliphub/internal/protocol"
+	"github.com/thalysguimaraes/cliphub/internal/hubclient"
 )
 
-var hubURL string
+var hub *hubclient.Client
 
 func main() {
-	hubURL = os.Getenv("CLIPHUB_HUB")
-	if hubURL == "" {
-		if url, err := discover.HubURL(); err == nil {
-			hubURL = url
-		} else {
-			hubURL = "http://localhost:8080"
-		}
-	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
 
 	// Allow --hub flag anywhere.
+	hubURL := os.Getenv("CLIPHUB_HUB")
 	args := os.Args[1:]
 	for i, arg := range args {
 		if arg == "--hub" && i+1 < len(args) {
@@ -46,16 +43,31 @@ func main() {
 		os.Exit(1)
 	}
 
+	if hubURL == "" {
+		resolver := discover.NewResolver(discover.DefaultConfig())
+		if url, err := resolver.HubURL(ctx); err == nil {
+			hubURL = url
+		} else {
+			hubURL = "http://localhost:8080"
+		}
+	}
+
 	var err error
+	hub, err = hubclient.New(hubclient.Config{BaseURL: hubURL})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
 	switch args[0] {
 	case "get":
-		err = cmdGet(args[1:])
+		err = cmdGet(ctx, args[1:])
 	case "put":
-		err = cmdPut(args[1:])
+		err = cmdPut(ctx, args[1:])
 	case "history":
-		err = cmdHistory(args[1:])
+		err = cmdHistory(ctx, args[1:])
 	case "status":
-		err = cmdStatus()
+		err = cmdStatus(ctx)
 	case "pause":
 		err = cmdPause()
 	case "resume":
@@ -86,10 +98,14 @@ Commands:
 
 Flags:
   --hub URL        Hub URL (default: auto-discovered, $CLIPHUB_HUB, or localhost)
+
+Environment:
+  CLIPHUB_HUB        Explicit hub URL override
+  CLIPHUB_HOSTNAME   Tailnet hostname used for auto-discovery (default: cliphub)
 `)
 }
 
-func cmdGet(args []string) error {
+func cmdGet(ctx context.Context, args []string) error {
 	var outFile string
 	for i, arg := range args {
 		if (arg == "-o" || arg == "--output") && i+1 < len(args) {
@@ -98,22 +114,12 @@ func cmdGet(args []string) error {
 		}
 	}
 
-	resp, err := http.Get(hubURL + "/api/clip")
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNoContent {
+	item, err := hub.Current(ctx)
+	if errors.Is(err, hubclient.ErrNoCurrentClip) {
 		fmt.Fprintln(os.Stderr, "(clipboard empty)")
 		return nil
 	}
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("hub returned %d", resp.StatusCode)
-	}
-
-	var item protocol.ClipItem
-	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
+	if err != nil {
 		return err
 	}
 
@@ -138,7 +144,7 @@ func cmdGet(args []string) error {
 	return nil
 }
 
-func cmdPut(args []string) error {
+func cmdPut(ctx context.Context, args []string) error {
 	var (
 		mimeType string
 		filePath string
@@ -162,7 +168,7 @@ func cmdPut(args []string) error {
 		}
 	}
 
-	var payload map[string]any
+	var payload hubclient.PutRequest
 
 	if filePath != "" {
 		data, err := os.ReadFile(filePath)
@@ -173,9 +179,9 @@ func cmdPut(args []string) error {
 			mimeType = mimeFromExt(filepath.Ext(filePath))
 		}
 		if strings.HasPrefix(mimeType, "text/") {
-			payload = map[string]any{"content": string(data), "mime_type": mimeType}
+			payload = hubclient.PutRequest{Content: string(data), MimeType: mimeType}
 		} else {
-			payload = map[string]any{"data": data, "mime_type": mimeType}
+			payload = hubclient.PutRequest{Data: data, MimeType: mimeType}
 		}
 	} else {
 		var content string
@@ -194,50 +200,30 @@ func cmdPut(args []string) error {
 		if mimeType == "" {
 			mimeType = "text/plain"
 		}
-		payload = map[string]any{"content": content, "mime_type": mimeType}
+		payload = hubclient.PutRequest{Content: content, MimeType: mimeType}
 	}
 
-	body, _ := json.Marshal(payload)
-	resp, err := http.Post(hubURL+"/api/clip", "application/json", strings.NewReader(string(body)))
+	item, err := hub.Put(ctx, payload)
 	if err != nil {
 		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		msg, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("hub: %s (%d)", strings.TrimSpace(string(msg)), resp.StatusCode)
-	}
-
-	var item protocol.ClipItem
-	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
-		return fmt.Errorf("decode response: %w", err)
 	}
 	fmt.Fprintf(os.Stderr, "stored (seq=%d, %s, %d bytes)\n", item.Seq, item.MimeType, len(item.RawBytes()))
 	return nil
 }
 
-func cmdHistory(args []string) error {
-	limit := "20"
+func cmdHistory(ctx context.Context, args []string) error {
+	limit := 20
 	for i, arg := range args {
 		if (arg == "-n" || arg == "--limit") && i+1 < len(args) {
-			limit = args[i+1]
+			if n, err := strconv.Atoi(args[i+1]); err == nil && n > 0 {
+				limit = n
+			}
 			break
 		}
 	}
 
-	resp, err := http.Get(hubURL + "/api/clip/history?limit=" + limit)
+	items, err := hub.History(ctx, limit)
 	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("hub returned %d", resp.StatusCode)
-	}
-
-	var items []protocol.ClipItem
-	if err := json.NewDecoder(resp.Body).Decode(&items); err != nil {
 		return err
 	}
 
@@ -257,20 +243,10 @@ func cmdHistory(args []string) error {
 	return nil
 }
 
-func cmdStatus() error {
-	resp, err := http.Get(hubURL + "/api/status")
+func cmdStatus(ctx context.Context) error {
+	status, err := hub.Status(ctx)
 	if err != nil {
 		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("hub returned %d", resp.StatusCode)
-	}
-
-	var status map[string]any
-	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
-		return fmt.Errorf("decode response: %w", err)
 	}
 
 	for k, v := range status {

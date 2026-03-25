@@ -23,5 +23,6 @@
 		<key>CLIPHUB_TTL</key>
 		<string>24h</string>
 	</dict>
+	<!-- Optional: set CLIPHUB_HOSTNAME to expose the hub under a different tailnet hostname. -->
 </dict>
 </plist>

@@ -1,24 +1,24 @@
 package agent
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
-	"net/http"
 	"os"
 	"path/filepath"
 	"sync/atomic"
 	"time"
 
 	"github.com/thalysguimaraes/cliphub/internal/clipboard"
+	"github.com/thalysguimaraes/cliphub/internal/hubclient"
 	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
 
 // Config holds agent configuration.
 type Config struct {
 	HubURL       string              // Base URL of the hub.
+	Client       *hubclient.Client   // Shared hub client (preferred when set).
 	NodeName     string              // This node's name.
 	PollInterval time.Duration       // Clipboard poll interval.
 	Clipboard    clipboard.Clipboard // Clipboard backend (nil = system default).
@@ -30,7 +30,7 @@ type Agent struct {
 	nodeName     string
 	pollInterval time.Duration
 	monitor      *ClipboardMonitor
-	client       *http.Client
+	client       *hubclient.Client
 	paused       atomic.Bool
 	bootstrapped atomic.Bool
 }
@@ -69,26 +69,36 @@ func New(cfg Config) (*Agent, error) {
 	if cfg.PollInterval <= 0 {
 		cfg.PollInterval = 500 * time.Millisecond
 	}
+
+	client := cfg.Client
+	if client == nil && cfg.HubURL != "" {
+		var err error
+		client, err = hubclient.New(hubclient.Config{BaseURL: cfg.HubURL})
+		if err != nil {
+			return nil, err
+		}
+	}
+	if client != nil {
+		cfg.HubURL = client.BaseURL()
+	}
+
 	return &Agent{
 		hubURL:       cfg.HubURL,
 		nodeName:     cfg.NodeName,
 		pollInterval: cfg.PollInterval,
 		monitor:      NewClipboardMonitor(clip),
-		client:       &http.Client{Timeout: 10 * time.Second},
+		client:       client,
 	}, nil
 }
 
 // Run starts the clipboard poll loop and WebSocket listener.
 func (a *Agent) Run(ctx context.Context) error {
-	wsURL := a.hubURL + "/api/clip/stream"
-	if len(wsURL) > 4 && wsURL[:5] == "https" {
-		wsURL = "wss" + wsURL[5:]
-	} else if len(wsURL) > 3 && wsURL[:4] == "http" {
-		wsURL = "ws" + wsURL[4:]
+	if a.client == nil {
+		return fmt.Errorf("hub client is not configured")
 	}
 
 	ws := &WSClient{
-		URL: wsURL,
+		URL: a.client.StreamURL(),
 		OnConnected: func() {
 			if !a.bootstrapped.Load() {
 				a.bootstrap(ctx)
@@ -158,37 +168,18 @@ func (a *Agent) bootstrap(ctx context.Context) {
 
 // tryBootstrap attempts a single bootstrap fetch. Returns true on success.
 func (a *Agent) tryBootstrap(ctx context.Context) bool {
-	req, err := http.NewRequestWithContext(ctx, "GET", a.hubURL+"/api/clip", nil)
-	if err != nil {
-		slog.Error("bootstrap: build request failed", "err", err)
-		return false
-	}
-
-	resp, err := a.client.Do(req)
-	if err != nil {
-		slog.Warn("bootstrap: fetch failed", "err", err)
-		return false
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNoContent {
+	item, err := a.client.Current(ctx)
+	if errors.Is(err, hubclient.ErrNoCurrentClip) {
 		slog.Info("bootstrap: hub has no current clip")
 		a.bootstrapped.Store(true)
 		return true
 	}
-
-	if resp.StatusCode >= 400 {
-		slog.Warn("bootstrap: hub returned error", "status", resp.StatusCode)
+	if err != nil {
+		slog.Warn("bootstrap: fetch failed", "err", err)
 		return false
 	}
 
-	var item protocol.ClipItem
-	if err := json.NewDecoder(resp.Body).Decode(&item); err != nil {
-		slog.Warn("bootstrap: decode failed", "err", err)
-		return false
-	}
-
-	a.applyRemote(item)
+	a.applyRemote(*item)
 	slog.Info("bootstrap: applied hub clip", "seq", item.Seq, "source", item.Source, "mime", item.MimeType)
 	a.bootstrapped.Store(true)
 	return true
@@ -216,29 +207,15 @@ func (a *Agent) isPaused() bool {
 }
 
 func (a *Agent) sendToHub(ctx context.Context, ct clipboard.Content) error {
-	payload := map[string]any{"mime_type": ct.MimeType}
+	payload := hubclient.PutRequest{MimeType: ct.MimeType, Source: a.nodeName}
 	if ct.IsText() {
-		payload["content"] = ct.Text()
+		payload.Content = ct.Text()
 	} else {
-		payload["data"] = ct.Data
+		payload.Data = ct.Data
 	}
 
-	body, _ := json.Marshal(payload)
-	req, err := http.NewRequestWithContext(ctx, "POST", a.hubURL+"/api/clip", bytes.NewReader(body))
-	if err != nil {
+	if _, err := a.client.Put(ctx, payload); err != nil {
 		return err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Clip-Source", a.nodeName)
-
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 400 {
-		return fmt.Errorf("hub returned %d", resp.StatusCode)
 	}
 
 	slog.Info("sent clip to hub", "mime", ct.MimeType, "len", len(ct.Data))

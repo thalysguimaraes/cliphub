@@ -112,7 +112,7 @@ tailclip status                  # hub uptime, seq, subscribers
 tailclip pause / resume          # toggle sync on this machine
 ```
 
-Both `clipd` and `tailclip` auto-discover the hub by looking for a `cliphub` peer on your tailnet. Override with `--hub` or `CLIPHUB_HUB`.
+Both `clipd` and `tailclip` auto-discover the hub by looking for the hostname in `CLIPHUB_HOSTNAME` on your tailnet (`cliphub` by default). Override the full URL with `--hub` or `CLIPHUB_HUB`.
 
 ## How it works
 
@@ -175,13 +175,14 @@ launchctl load ~/Library/LaunchAgents/com.cliphub.agent.plist
 ```
 </details>
 
-The agent auto-discovers the hub from your tailnet. No configuration needed.
+The agent auto-discovers the hub from your tailnet by default. Set `CLIPHUB_HOSTNAME` only if you run the hub under a different tailnet hostname.
 
 ## Configuration
 
 | Env var | Flag | Default | Description |
 |---------|------|---------|-------------|
 | `CLIPHUB_HUB` | `--hub` | auto-discovered | Hub URL |
+| `CLIPHUB_HOSTNAME` | `--hostname` (hub only) | `cliphub` | Tailnet hostname used by the hub and auto-discovery |
 | `CLIPHUB_MAX_HISTORY` | `--max-history` | `50` | Max history items |
 | `CLIPHUB_TTL` | `--ttl` | `24h` | Item TTL |
 
