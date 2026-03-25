@@ -28,6 +28,14 @@ func (f *fakeClipboard) Write(c clipboard.Content) error {
 	return nil
 }
 
+func (f *fakeClipboard) Clear() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.content = clipboard.Content{}
+	return nil
+}
+
 func (f *fakeClipboard) SetContent(c clipboard.Content) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

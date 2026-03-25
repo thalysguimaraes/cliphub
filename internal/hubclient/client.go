@@ -179,6 +179,20 @@ func (c *Client) History(ctx context.Context, limit int) ([]protocol.ClipItem, e
 	return items, nil
 }
 
+// Clear removes the current hub clipboard state and persisted history.
+func (c *Client) Clear(ctx context.Context) error {
+	resp, err := c.do(ctx, http.MethodDelete, c.endpoint("api", "clip"), nil, nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return readHTTPError(resp)
+	}
+	return nil
+}
+
 // Status fetches the current hub status payload.
 func (c *Client) Status(ctx context.Context) (map[string]any, error) {
 	resp, err := c.do(ctx, http.MethodGet, c.endpoint("api", "status"), nil, nil)

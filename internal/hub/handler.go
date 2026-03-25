@@ -32,6 +32,7 @@ func Register(mux *http.ServeMux, h *Hub, identFn IdentityFunc, observers ...*Ob
 
 	handle("POST /api/clip", "/api/clip", postClipHandler(h, identFn, obs))
 	handle("GET /api/clip", "/api/clip", getClipHandler(h))
+	handle("DELETE /api/clip", "/api/clip", clearClipHandler(h))
 	handle("GET /api/clip/history", "/api/clip/history", historyHandler(h))
 	handle("GET /api/clip/stream", "/api/clip/stream", streamHandler(h, obs))
 	handle("GET /api/status", "/api/status", statusHandler(h, obs))
@@ -121,6 +122,16 @@ func getClipHandler(h *Hub) http.HandlerFunc {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(item)
+	}
+}
+
+func clearClipHandler(h *Hub) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := h.Clear(); err != nil {
+			http.Error(w, "clear failed", http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
