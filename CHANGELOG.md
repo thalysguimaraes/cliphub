@@ -19,6 +19,7 @@ Suggested headings:
 
 - Governance baseline for contributors and maintainers, including contribution, security, and conduct documentation plus GitHub issue and pull request templates.
 - Opt-in clipboard privacy controls for app/process ignore lists, sensitive-content filtering (`secret`, `password-manager`, `otp`), and explicit `tailclip clear` history wiping.
+- Hub operability endpoints for liveness, readiness, and Prometheus-style metrics, plus reconnect/shutdown integration coverage and a `make test-race` workflow entrypoint.
 
 ### Security
 

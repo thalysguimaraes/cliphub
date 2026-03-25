@@ -8,8 +8,10 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/thalysguimaraes/cliphub/internal/clipboard"
@@ -20,7 +22,7 @@ import (
 var hub *hubclient.Client
 
 func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	// Allow --hub flag anywhere.
@@ -281,8 +283,14 @@ func cmdStatus(ctx context.Context) error {
 		return err
 	}
 
-	for k, v := range status {
-		fmt.Printf("%-12s %v\n", k+":", v)
+	keys := make([]string, 0, len(status))
+	for key := range status {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		fmt.Printf("%-24s %v\n", key+":", status[key])
 	}
 	return nil
 }

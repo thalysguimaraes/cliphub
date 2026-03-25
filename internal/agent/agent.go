@@ -122,7 +122,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	ticker := time.NewTicker(a.pollInterval)
 	defer ticker.Stop()
 
-	slog.Info("clipd started", "hub", a.hubURL, "node", a.nodeName, "poll", a.pollInterval)
+	slog.Info("clipd started", "component", "clipd", "hub_url", a.hubURL, "node_name", a.nodeName, "poll_interval", a.pollInterval)
 
 	for {
 		select {
@@ -141,7 +141,7 @@ func (a *Agent) Run(ctx context.Context) error {
 					continue
 				}
 				if err := a.sendToHub(ctx, ct); err != nil {
-					slog.Error("failed to send clip to hub, will retry", "err", err)
+					slog.Error("failed to send clip to hub, will retry", "component", "clipd", "error", err)
 				} else {
 					a.monitor.MarkSent()
 				}
@@ -163,7 +163,7 @@ func (a *Agent) bootstrap(ctx context.Context) {
 			a.bootstrapped.Store(true)
 			return
 		}
-		slog.Warn("bootstrap: retry", "attempt", attempt, "retry_in", backoff)
+		slog.Warn("bootstrap retry", "component", "clipd_bootstrap", "attempt", attempt, "retry_delay", backoff)
 		select {
 		case <-ctx.Done():
 			a.bootstrapped.Store(true)
@@ -173,7 +173,7 @@ func (a *Agent) bootstrap(ctx context.Context) {
 		backoff = min(backoff*2, 5*time.Second)
 	}
 
-	slog.Error("bootstrap: all retries exhausted, proceeding without hub state")
+	slog.Error("bootstrap retries exhausted; proceeding without hub state", "component", "clipd_bootstrap")
 	a.bootstrapped.Store(true)
 }
 
@@ -181,17 +181,17 @@ func (a *Agent) bootstrap(ctx context.Context) {
 func (a *Agent) tryBootstrap(ctx context.Context) bool {
 	item, err := a.client.Current(ctx)
 	if errors.Is(err, hubclient.ErrNoCurrentClip) {
-		slog.Info("bootstrap: hub has no current clip")
+		slog.Info("bootstrap found no current clip", "component", "clipd_bootstrap")
 		a.bootstrapped.Store(true)
 		return true
 	}
 	if err != nil {
-		slog.Warn("bootstrap: fetch failed", "err", err)
+		slog.Warn("bootstrap fetch failed", "component", "clipd_bootstrap", "error", err)
 		return false
 	}
 
 	a.applyRemote(*item)
-	slog.Info("bootstrap: applied hub clip", "seq", item.Seq, "source", item.Source, "mime", item.MimeType)
+	slog.Info("bootstrap applied hub clip", "component", "clipd_bootstrap", "sequence", item.Seq, "source", item.Source, "mime_type", item.MimeType)
 	a.bootstrapped.Store(true)
 	return true
 }
@@ -201,15 +201,15 @@ func (a *Agent) applyRemote(item protocol.ClipItem) {
 		return
 	}
 	if item.Source == a.nodeName {
-		slog.Debug("ignoring own update", "seq", item.Seq)
+		slog.Debug("ignoring own update", "component", "clipd", "sequence", item.Seq)
 		return
 	}
 
 	ct := itemToContent(item)
 	if err := a.monitor.ApplyRemote(ct); err != nil {
-		slog.Error("failed to apply remote clip", "err", err)
+		slog.Error("failed to apply remote clip", "component", "clipd", "error", err)
 	} else {
-		slog.Info("applied remote clip", "seq", item.Seq, "source", item.Source, "mime", item.MimeType)
+		slog.Info("applied remote clip", "component", "clipd", "sequence", item.Seq, "source", item.Source, "mime_type", item.MimeType)
 	}
 }
 
@@ -229,7 +229,7 @@ func (a *Agent) sendToHub(ctx context.Context, ct clipboard.Content) error {
 		return err
 	}
 
-	slog.Info("sent clip to hub", "mime", ct.MimeType, "len", len(ct.Data))
+	slog.Info("sent clip to hub", "component", "clipd", "mime_type", ct.MimeType, "payload_bytes", len(ct.Data))
 	return nil
 }
 

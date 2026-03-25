@@ -1,7 +1,9 @@
 package hub
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -18,13 +20,25 @@ import (
 type IdentityFunc func(r *http.Request) string
 
 // Register mounts all API routes on mux.
-func Register(mux *http.ServeMux, h *Hub, identFn IdentityFunc) {
-	mux.HandleFunc("POST /api/clip", postClipHandler(h, identFn))
-	mux.HandleFunc("GET /api/clip", getClipHandler(h))
-	mux.HandleFunc("DELETE /api/clip", clearClipHandler(h))
-	mux.HandleFunc("GET /api/clip/history", historyHandler(h))
-	mux.HandleFunc("GET /api/clip/stream", streamHandler(h))
-	mux.HandleFunc("GET /api/status", statusHandler(h))
+func Register(mux *http.ServeMux, h *Hub, identFn IdentityFunc, observers ...*Observer) {
+	obs := NewObserver()
+	if len(observers) > 0 && observers[0] != nil {
+		obs = observers[0]
+	}
+
+	handle := func(pattern string, route string, handler http.HandlerFunc) {
+		mux.Handle(pattern, withObservability(obs, route, handler))
+	}
+
+	handle("POST /api/clip", "/api/clip", postClipHandler(h, identFn, obs))
+	handle("GET /api/clip", "/api/clip", getClipHandler(h))
+	handle("DELETE /api/clip", "/api/clip", clearClipHandler(h))
+	handle("GET /api/clip/history", "/api/clip/history", historyHandler(h))
+	handle("GET /api/clip/stream", "/api/clip/stream", streamHandler(h, obs))
+	handle("GET /api/status", "/api/status", statusHandler(h, obs))
+	handle("GET /healthz", "/healthz", healthHandler(h, obs))
+	handle("GET /readyz", "/readyz", readinessHandler(obs))
+	handle("GET /metrics", "/metrics", metricsHandler(h, obs))
 }
 
 type postClipRequest struct {
@@ -33,7 +47,7 @@ type postClipRequest struct {
 	MimeType string `json:"mime_type,omitempty"`
 }
 
-func postClipHandler(h *Hub, identFn IdentityFunc) http.HandlerFunc {
+func postClipHandler(h *Hub, identFn IdentityFunc, obs *Observer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		body, err := io.ReadAll(io.LimitReader(r.Body, int64(protocol.MaxContentSize)+1))
 		if err != nil {
@@ -79,11 +93,22 @@ func postClipHandler(h *Hub, identFn IdentityFunc) http.HandlerFunc {
 		w.Header().Set("Content-Type", "application/json")
 		if isNew {
 			w.WriteHeader(http.StatusCreated)
+			obs.RecordClipStored()
+		} else {
+			obs.RecordClipDeduplicated()
 		}
 		json.NewEncoder(w).Encode(item)
 
 		if isNew {
-			slog.Info("clip stored", "seq", item.Seq, "source", source, "mime", item.MimeType, "len", len(item.RawBytes()))
+			slog.Info(
+				"clip stored",
+				"component", "hub_api",
+				"request_id", requestIDFromContext(r.Context()),
+				"sequence", item.Seq,
+				"source", source,
+				"mime_type", item.MimeType,
+				"payload_bytes", len(item.RawBytes()),
+			)
 		}
 	}
 }
@@ -124,16 +149,31 @@ func historyHandler(h *Hub) http.HandlerFunc {
 	}
 }
 
-func streamHandler(h *Hub) http.HandlerFunc {
+func streamHandler(h *Hub, obs *Observer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
 		if err != nil {
-			slog.Error("websocket accept failed", "err", err)
+			slog.Error(
+				"websocket accept failed",
+				"component", "hub_stream",
+				"request_id", requestIDFromContext(r.Context()),
+				"error", err,
+			)
 			return
 		}
 		defer conn.CloseNow()
+		obs.RecordWSConnect()
+		defer obs.RecordWSDisconnect()
 
-		ctx := r.Context()
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+		go func() {
+			select {
+			case <-ctx.Done():
+			case <-obs.ShutdownContext().Done():
+				cancel()
+			}
+		}()
 
 		// Subscribe first so we don't miss items arriving during catch-up.
 		sub := h.Subscribe(ctx)
@@ -147,7 +187,12 @@ func streamHandler(h *Hub) http.HandlerFunc {
 				for _, item := range missed {
 					msg := protocol.WSMessage{Type: "clip_update", Item: &item}
 					if err := wsjson.Write(ctx, conn, msg); err != nil {
-						slog.Debug("websocket catch-up write failed", "err", err)
+						slog.Debug(
+							"websocket catch-up write failed",
+							"component", "hub_stream",
+							"request_id", requestIDFromContext(r.Context()),
+							"error", err,
+						)
 						return
 					}
 					if item.Seq > replayedUpTo {
@@ -155,17 +200,29 @@ func streamHandler(h *Hub) http.HandlerFunc {
 					}
 				}
 				if len(missed) > 0 {
-					slog.Info("catch-up replay", "since_seq", sinceSeq, "replayed", len(missed))
+					obs.RecordWSCatchup(len(missed))
+					slog.Info(
+						"websocket catch-up replay",
+						"component", "hub_stream",
+						"request_id", requestIDFromContext(r.Context()),
+						"since_sequence", sinceSeq,
+						"replayed_items", len(missed),
+					)
 				}
 			}
 		}
 
-		slog.Info("subscriber connected", "remote", r.RemoteAddr)
+		slog.Info(
+			"subscriber connected",
+			"component", "hub_stream",
+			"request_id", requestIDFromContext(r.Context()),
+			"remote_addr", r.RemoteAddr,
+		)
 
 		for {
 			select {
 			case <-ctx.Done():
-				conn.Close(websocket.StatusNormalClosure, "bye")
+				_ = conn.Close(websocket.StatusNormalClosure, "bye")
 				return
 			case item := <-sub.C:
 				if item.Seq <= replayedUpTo {
@@ -173,7 +230,12 @@ func streamHandler(h *Hub) http.HandlerFunc {
 				}
 				msg := protocol.WSMessage{Type: "clip_update", Item: &item}
 				if err := wsjson.Write(ctx, conn, msg); err != nil {
-					slog.Debug("websocket write failed", "err", err)
+					slog.Debug(
+						"websocket write failed",
+						"component", "hub_stream",
+						"request_id", requestIDFromContext(r.Context()),
+						"error", err,
+					)
 					return
 				}
 			}
@@ -181,14 +243,46 @@ func streamHandler(h *Hub) http.HandlerFunc {
 	}
 }
 
-func statusHandler(h *Hub) http.HandlerFunc {
+func statusHandler(h *Hub, obs *Observer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		status := map[string]any{
-			"uptime":      time.Since(h.StartedAt()).String(),
-			"seq":         h.Seq(),
-			"subscribers": h.SubscriberCount(),
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(status)
+		writeJSON(w, http.StatusOK, obs.Status(h))
 	}
+}
+
+func healthHandler(h *Hub, obs *Observer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status": "ok",
+			"ready":  obs.Ready(),
+			"uptime": time.Since(h.StartedAt()).String(),
+		})
+	}
+}
+
+func readinessHandler(obs *Observer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		statusCode := http.StatusOK
+		status := "ready"
+		if !obs.Ready() {
+			statusCode = http.StatusServiceUnavailable
+			status = "shutting_down"
+		}
+		writeJSON(w, statusCode, map[string]any{
+			"status": status,
+			"ready":  obs.Ready(),
+		})
+	}
+}
+
+func metricsHandler(h *Hub, obs *Observer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+		fmt.Fprint(w, obs.Metrics(h))
+	}
+}
+
+func writeJSON(w http.ResponseWriter, statusCode int, value any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(statusCode)
+	_ = json.NewEncoder(w).Encode(value)
 }

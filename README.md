@@ -65,6 +65,7 @@ git clone https://github.com/thalysguimaraes/cliphub.git
 cd cliphub
 make all    # builds bin/cliphub, bin/clipd, bin/tailclip
 make test   # runs all tests
+make test-race  # runs the race detector across the Go packages
 ```
 
 ## CI
@@ -74,7 +75,7 @@ Public CI runs on pull requests and pushes to `main`.
 - `go test ./...` runs on Ubuntu, macOS, and Windows.
 - `go build ./cmd/clipd ./cmd/cliphub ./cmd/tailclip` runs on Ubuntu, macOS, and Windows as a native multi-binary smoke build.
 - `go vet ./...` runs on Ubuntu as the stable built-in lint gate.
-- `go test -race ./...` runs on Ubuntu as the race-detection gate.
+- `make test-race` (`go test -race ./...`) runs on Ubuntu as the race-detection gate.
 - `make release` runs on Ubuntu to smoke-test the current cross-platform release target set.
 
 Platform-specific exclusions:
@@ -174,7 +175,10 @@ After writing, the agent reads back the clipboard to handle platform format conv
 | `DELETE` | `/api/clip` | Clear current hub clipboard state and persisted history |
 | `GET` | `/api/clip/history?limit=N` | History (newest first) |
 | `GET` | `/api/clip/stream?since_seq=N` | WebSocket: live updates + catch-up replay |
-| `GET` | `/api/status` | Hub status |
+| `GET` | `/api/status` | Hub status, readiness, and lightweight counters |
+| `GET` | `/healthz` | Liveness check (200 while the process is healthy) |
+| `GET` | `/readyz` | Readiness check (503 while shutting down/draining) |
+| `GET` | `/metrics` | Prometheus-style text metrics for hub activity and lifecycle |
 
 ## Running as a service
 
