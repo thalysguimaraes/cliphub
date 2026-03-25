@@ -1,0 +1,59 @@
+name: Feature request
+description: Propose a new capability or workflow improvement for ClipHub.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for sharing an idea.
+
+        Please use this template for feature work, workflow improvements, and substantial documentation requests. For sensitive security issues, follow the private reporting instructions in:
+        https://github.com/thalysguimaraes/cliphub/security/policy
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem or use case
+      description: What are you trying to do, and what is hard about the current behavior?
+      placeholder: I want the desktop agent to ignore clipboard changes from specific apps so password managers do not get mirrored.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Affected area
+      options:
+        - cliphub (hub)
+        - clipd (desktop agent)
+        - tailclip (CLI)
+        - iOS app or extensions
+        - Build or release tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the shape of the solution you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Share any workarounds, competing ideas, or reasons you rejected other options.
+  - type: textarea
+    id: success
+    attributes:
+      label: What would success look like?
+      description: Explain how someone would know the feature is complete and useful.
+    validations:
+      required: true
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Contribution intent
+      options:
+        - label: I would be willing to open a pull request for this.
+        - label: I am happy to help validate the feature once there is a prototype.

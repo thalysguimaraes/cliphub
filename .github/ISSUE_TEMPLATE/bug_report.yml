@@ -1,0 +1,88 @@
+name: Bug report
+description: Report a reproducible defect in the hub, agent, CLI, iOS app, or project docs.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug.
+
+        For vulnerabilities or sensitive security issues, do not file a public issue. Follow the private reporting instructions in the security policy:
+        https://github.com/thalysguimaraes/cliphub/security/policy
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      description: Which part of ClipHub is involved?
+      options:
+        - cliphub (hub)
+        - clipd (desktop agent)
+        - tailclip (CLI)
+        - iOS app or extensions
+        - Build or release tooling
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      description: Where did you reproduce the problem?
+      options:
+        - macOS
+        - Linux (Wayland)
+        - Linux (X11)
+        - Windows
+        - iOS
+        - Multiple platforms
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version, commit, or build
+      description: Share the tag, commit SHA, or describe how you built ClipHub.
+      placeholder: main@398fff9, local branch, or binary release name
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the bug in one or two sentences.
+      placeholder: Remote clipboard updates stop applying after the agent reconnects.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Include the exact inputs, commands, and conditions needed to reproduce the issue.
+      placeholder: |
+        1. Start `cliphub -dev`
+        2. Start `clipd`
+        3. Copy HTML content on machine A
+        4. Observe machine B
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs, screenshots, or extra context
+      description: Paste logs, stack traces, screenshots, or notes that help narrow the issue.
+      render: shell
