@@ -42,6 +42,14 @@ func (s *blockingStore) LoadState(int) (uint64, []protocol.ClipItem, error) {
 	return 0, nil, nil
 }
 
+func (s *blockingStore) HistoryPage(int, uint64) ([]protocol.ClipItem, error) {
+	return nil, nil
+}
+
+func (s *blockingStore) LoadItem(uint64) (*protocol.ClipItem, error) {
+	return nil, nil
+}
+
 func (s *blockingStore) SaveItem(item protocol.ClipItem) (protocol.ClipItem, error) {
 	s.saveStarted <- item
 	<-s.releaseSave

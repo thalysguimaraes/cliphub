@@ -21,6 +21,10 @@ Suggested headings:
 - Opt-in clipboard privacy controls for app/process ignore lists, sensitive-content filtering (`secret`, `password-manager`, `otp`), and explicit `tailclip clear` history wiping.
 - Hub operability endpoints for liveness, readiness, and Prometheus-style metrics, plus reconnect/shutdown integration coverage and a `make test-race` workflow entrypoint.
 
+### Changed
+
+- Added raw blob upload/download endpoints, cursor-paged history responses, and typed HTTP error envelopes so large ClipHub API payloads no longer need to rely solely on base64-in-JSON workflows.
+
 ### Security
 
 - Documented current privacy limitations, including plaintext-at-rest history storage and the scope of explicit clipboard clear behavior.

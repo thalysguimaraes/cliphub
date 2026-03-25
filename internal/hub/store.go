@@ -78,10 +78,7 @@ func (s *Store) LoadState(maxHistory int) (uint64, []protocol.ClipItem, error) {
 		return 0, nil, err
 	}
 
-	rows, err := s.db.Query(
-		"SELECT seq, mime_type, content, data, hash, source, created_at, expires_at FROM clips ORDER BY seq DESC LIMIT ?",
-		maxHistory,
-	)
+	rows, err := s.db.Query(selectClipColumns+" ORDER BY seq DESC LIMIT ?", maxHistory)
 	if err != nil {
 		return seq, nil, fmt.Errorf("load history: %w", err)
 	}
@@ -89,21 +86,56 @@ func (s *Store) LoadState(maxHistory int) (uint64, []protocol.ClipItem, error) {
 
 	var items []protocol.ClipItem
 	for rows.Next() {
-		var item protocol.ClipItem
-		var content sql.NullString
-		var data []byte
-		var createdAt, expiresAt string
-
-		if err := rows.Scan(&item.Seq, &item.MimeType, &content, &data, &item.Hash, &item.Source, &createdAt, &expiresAt); err != nil {
+		item, err := scanClip(rows)
+		if err != nil {
 			return seq, nil, fmt.Errorf("scan clip: %w", err)
 		}
-		item.Content = content.String
-		item.Data = data
-		item.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
-		item.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expiresAt)
 		items = append(items, item)
 	}
 	return seq, items, rows.Err()
+}
+
+// HistoryPage returns up to limit items newer than the optional beforeSeq cursor.
+// Items are returned newest-first.
+func (s *Store) HistoryPage(limit int, beforeSeq uint64) ([]protocol.ClipItem, error) {
+	query := selectClipColumns
+	args := make([]any, 0, 2)
+	if beforeSeq > 0 {
+		query += " WHERE seq < ?"
+		args = append(args, beforeSeq)
+	}
+	query += " ORDER BY seq DESC LIMIT ?"
+	args = append(args, limit)
+
+	rows, err := s.db.Query(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("load history page: %w", err)
+	}
+	defer rows.Close()
+
+	var items []protocol.ClipItem
+	for rows.Next() {
+		item, err := scanClip(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan clip: %w", err)
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+// LoadItem fetches a single clip by sequence number.
+func (s *Store) LoadItem(seq uint64) (*protocol.ClipItem, error) {
+	row := s.db.QueryRow(selectClipColumns+" WHERE seq = ?", seq)
+
+	item, err := scanClip(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("load clip %d: %w", seq, err)
+	}
+	return &item, nil
 }
 
 // SaveItem persists a clip item and returns it with seq assigned.
@@ -198,4 +230,26 @@ func (s *Store) loadSeq() (uint64, error) {
 		}
 	}
 	return seq, nil
+}
+
+const selectClipColumns = "SELECT seq, mime_type, content, data, hash, source, created_at, expires_at FROM clips"
+
+type clipScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanClip(scanner clipScanner) (protocol.ClipItem, error) {
+	var item protocol.ClipItem
+	var content sql.NullString
+	var data []byte
+	var createdAt, expiresAt string
+
+	if err := scanner.Scan(&item.Seq, &item.MimeType, &content, &data, &item.Hash, &item.Source, &createdAt, &expiresAt); err != nil {
+		return protocol.ClipItem{}, err
+	}
+	item.Content = content.String
+	item.Data = data
+	item.CreatedAt, _ = time.Parse(time.RFC3339Nano, createdAt)
+	item.ExpiresAt, _ = time.Parse(time.RFC3339Nano, expiresAt)
+	return item, nil
 }
