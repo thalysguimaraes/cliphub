@@ -196,3 +196,46 @@ func TestWebSocketStream(t *testing.T) {
 		t.Fatalf("unexpected ws message: %+v", msg)
 	}
 }
+
+func TestWebSocketStreamReplaySinceSeq(t *testing.T) {
+	_, srv := setupServer(t)
+
+	post := func(body string) {
+		t.Helper()
+		resp, err := http.Post(srv.URL+"/api/clip", "application/json", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+
+	post(`{"content":"first"}`)
+	post(`{"content":"second"}`)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, srv.URL+"/api/clip/stream?since_seq=1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+
+	var replay protocol.WSMessage
+	if err := wsjson.Read(ctx, conn, &replay); err != nil {
+		t.Fatal(err)
+	}
+	if replay.Type != "clip_update" || replay.Item == nil || replay.Item.Seq != 2 || replay.Item.Content != "second" {
+		t.Fatalf("unexpected replay message: %+v", replay)
+	}
+
+	post(`{"content":"third"}`)
+
+	var live protocol.WSMessage
+	if err := wsjson.Read(ctx, conn, &live); err != nil {
+		t.Fatal(err)
+	}
+	if live.Type != "clip_update" || live.Item == nil || live.Item.Seq != 3 || live.Item.Content != "third" {
+		t.Fatalf("unexpected live message after replay: %+v", live)
+	}
+}

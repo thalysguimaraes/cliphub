@@ -33,10 +33,23 @@ type Hub struct {
 	seq        uint64
 	ttl        time.Duration
 	startedAt  time.Time
-	store      *Store // nil if no persistence.
+	store      clipStore // nil if no persistence.
+
+	// publishMu serializes post-commit side effects in sequence order so
+	// persistence and subscriber delivery stay monotonic after h.mu is released.
+	publishMu    sync.Mutex
+	publishCond  *sync.Cond
+	publishedSeq uint64
 
 	subsMu sync.RWMutex
 	subs   map[*Subscriber]struct{}
+}
+
+type clipStore interface {
+	Close() error
+	LoadState(maxHistory int) (uint64, []protocol.ClipItem, error)
+	SaveItem(item protocol.ClipItem) error
+	DeleteExpired(before time.Time) (int, error)
 }
 
 // New creates a Hub, optionally backed by SQLite, and starts the TTL reaper.
@@ -73,6 +86,9 @@ func New(cfg Config) (*Hub, error) {
 		slog.Info("loaded state from db", "seq", seq, "items", len(items))
 	}
 
+	h.publishCond = sync.NewCond(&h.publishMu)
+	h.publishedSeq = h.seq
+
 	go h.reapLoop()
 	return h, nil
 }
@@ -104,10 +120,10 @@ func (h *Hub) Put(in PutInput) (protocol.ClipItem, bool) {
 	}
 
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	if h.current != nil && h.current.Hash == hash && h.current.MimeType == in.MimeType {
-		return *h.current, false
+		item := cloneClipItem(*h.current)
+		h.mu.Unlock()
+		return item, false
 	}
 
 	h.seq++
@@ -116,7 +132,7 @@ func (h *Hub) Put(in PutInput) (protocol.ClipItem, bool) {
 		Seq:       h.seq,
 		MimeType:  in.MimeType,
 		Content:   in.Content,
-		Data:      in.Data,
+		Data:      cloneBytes(in.Data),
 		Hash:      hash,
 		Source:    in.Source,
 		CreatedAt: now,
@@ -128,32 +144,17 @@ func (h *Hub) Put(in PutInput) (protocol.ClipItem, bool) {
 	if len(h.history) > h.maxHistory {
 		h.history = h.history[:h.maxHistory]
 	}
+	h.mu.Unlock()
 
-	// Fan-out to subscribers (non-blocking).
-	h.subsMu.RLock()
-	for sub := range h.subs {
-		select {
-		case sub.C <- item:
-		default:
-		}
-	}
-	h.subsMu.RUnlock()
-
-	// Persist to SQLite.
-	if h.store != nil {
-		if err := h.store.SaveItem(item); err != nil {
-			slog.Error("failed to persist clip", "seq", item.Seq, "err", err)
-		}
-	}
-
-	return item, true
+	h.publish(item)
+	return cloneClipItem(item), true
 }
 
 // Get returns the current clipboard item, or nil.
 func (h *Hub) Get() *protocol.ClipItem {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.current
+	return cloneClipItemPtr(h.current)
 }
 
 // History returns up to limit items from history.
@@ -164,9 +165,7 @@ func (h *Hub) History(limit int) []protocol.ClipItem {
 	if limit <= 0 || limit > len(h.history) {
 		limit = len(h.history)
 	}
-	out := make([]protocol.ClipItem, limit)
-	copy(out, h.history[:limit])
-	return out
+	return cloneClipItems(h.history[:limit])
 }
 
 // Since returns all items in history with seq > afterSeq, in chronological order.
@@ -177,7 +176,7 @@ func (h *Hub) Since(afterSeq uint64) []protocol.ClipItem {
 	var out []protocol.ClipItem
 	for i := len(h.history) - 1; i >= 0; i-- {
 		if h.history[i].Seq > afterSeq {
-			out = append(out, h.history[i])
+			out = append(out, cloneClipItem(h.history[i]))
 		}
 	}
 	return out
@@ -226,6 +225,74 @@ func (h *Hub) Seq() uint64 {
 // StartedAt returns when the hub was created.
 func (h *Hub) StartedAt() time.Time {
 	return h.startedAt
+}
+
+func (h *Hub) publish(item protocol.ClipItem) {
+	if h.publishCond == nil {
+		h.publishCond = sync.NewCond(&h.publishMu)
+		h.publishedSeq = h.seq - 1
+	}
+
+	h.publishMu.Lock()
+	for item.Seq != h.publishedSeq+1 {
+		h.publishCond.Wait()
+	}
+
+	for _, sub := range h.snapshotSubscribers() {
+		select {
+		case sub.C <- cloneClipItem(item):
+		default:
+		}
+	}
+
+	if h.store != nil {
+		if err := h.store.SaveItem(item); err != nil {
+			slog.Error("failed to persist clip", "seq", item.Seq, "err", err)
+		}
+	}
+
+	h.publishedSeq = item.Seq
+	h.publishCond.Broadcast()
+	h.publishMu.Unlock()
+}
+
+func (h *Hub) snapshotSubscribers() []*Subscriber {
+	h.subsMu.RLock()
+	defer h.subsMu.RUnlock()
+
+	subs := make([]*Subscriber, 0, len(h.subs))
+	for sub := range h.subs {
+		subs = append(subs, sub)
+	}
+	return subs
+}
+
+func cloneClipItemPtr(item *protocol.ClipItem) *protocol.ClipItem {
+	if item == nil {
+		return nil
+	}
+	cloned := cloneClipItem(*item)
+	return &cloned
+}
+
+func cloneClipItems(items []protocol.ClipItem) []protocol.ClipItem {
+	cloned := make([]protocol.ClipItem, len(items))
+	for i := range items {
+		cloned[i] = cloneClipItem(items[i])
+	}
+	return cloned
+}
+
+func cloneClipItem(item protocol.ClipItem) protocol.ClipItem {
+	item.Data = cloneBytes(item.Data)
+	return item
+}
+
+func cloneBytes(data []byte) []byte {
+	if len(data) == 0 {
+		return nil
+	}
+	return append([]byte(nil), data...)
 }
 
 func (h *Hub) reapLoop() {
