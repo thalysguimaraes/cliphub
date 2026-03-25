@@ -90,7 +90,7 @@ func TestFailedSendRetry(t *testing.T) {
 
 	// 1. Hub is rejecting posts. Set clipboard content.
 	rejectPosts.Store(true)
-	clip.content = textContent("important-data")
+	clip.SetContent(textContent("important-data"))
 
 	// Wait for a few poll cycles — the agent should try and fail.
 	time.Sleep(200 * time.Millisecond)
@@ -167,11 +167,11 @@ func TestFailedSendNewContentOverrides(t *testing.T) {
 
 	// Hub is down. User copies "old".
 	rejectPosts.Store(true)
-	clip.content = textContent("old")
+	clip.SetContent(textContent("old"))
 	time.Sleep(200 * time.Millisecond)
 
 	// User copies "new" while hub is still down.
-	clip.content = textContent("new")
+	clip.SetContent(textContent("new"))
 	time.Sleep(200 * time.Millisecond)
 
 	// Bring hub back.
@@ -235,7 +235,7 @@ func TestBootstrapPreventsStaleOverwrite(t *testing.T) {
 	}
 
 	// The local clipboard should have been updated to "hub-content".
-	local := clip.content
+	local := clip.Content()
 	if local.Text() != "hub-content" {
 		t.Fatalf("expected local clipboard to be 'hub-content', got %q", local.Text())
 	}
@@ -278,10 +278,10 @@ func TestMIMETypeChangeDetected(t *testing.T) {
 	seq1 := h.Seq()
 
 	// Same bytes, different MIME type.
-	clip.content = clipboard.Content{
+	clip.SetContent(clipboard.Content{
 		MimeType: "text/html",
 		Data:     []byte("hello"),
-	}
+	})
 	time.Sleep(200 * time.Millisecond)
 
 	if h.Seq() <= seq1 {
@@ -335,18 +335,21 @@ func TestPauseSourcesBlockRemoteApplyUntilResumed(t *testing.T) {
 		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			clip := &fakeClipboard{content: clipboard.Content{}}
-			a := New(Config{NodeName: "test", Clipboard: clip})
+		for _, tc := range tests {
+			t.Run(tc.name, func(t *testing.T) {
+				clip := &fakeClipboard{content: clipboard.Content{}}
+				a, err := New(Config{NodeName: "test", Clipboard: clip})
+				if err != nil {
+					t.Fatalf("New() error = %v", err)
+				}
 
-			resume := tc.pause(t, a)
-			a.applyRemote(protocol.ClipItem{
+				resume := tc.pause(t, a)
+				a.applyRemote(protocol.ClipItem{
 				MimeType: "text/plain",
 				Content:  "blocked-remote",
 				Source:   "other-node",
 			})
-			if got := clip.content.Text(); got != "" {
+			if got := clip.Content().Text(); got != "" {
 				t.Fatalf("expected paused remote apply to be blocked, got %q", got)
 			}
 
@@ -356,7 +359,7 @@ func TestPauseSourcesBlockRemoteApplyUntilResumed(t *testing.T) {
 				Content:  "after-resume",
 				Source:   "other-node",
 			})
-			if got := clip.content.Text(); got != "after-resume" {
+			if got := clip.Content().Text(); got != "after-resume" {
 				t.Fatalf("expected remote apply after resume, got %q", got)
 			}
 		})
@@ -404,16 +407,19 @@ func TestPauseSourcesBlockLocalCaptureUntilResumed(t *testing.T) {
 				return r.Header.Get("X-Clip-Source")
 			})
 			srv := httptest.NewServer(mux)
-			defer srv.Close()
+				defer srv.Close()
 
-			clip := &fakeClipboard{content: textContent("local-while-paused")}
-			a := New(Config{
-				HubURL:       srv.URL,
-				NodeName:     "test",
-				PollInterval: 20 * time.Millisecond,
-				Clipboard:    clip,
-			})
-			a.bootstrapped.Store(true)
+				clip := &fakeClipboard{content: textContent("local-while-paused")}
+				a, err := New(Config{
+					HubURL:       srv.URL,
+					NodeName:     "test",
+					PollInterval: 20 * time.Millisecond,
+					Clipboard:    clip,
+				})
+				if err != nil {
+					t.Fatalf("New() error = %v", err)
+				}
+				a.bootstrapped.Store(true)
 
 			resume := tc.pause(t, a)
 

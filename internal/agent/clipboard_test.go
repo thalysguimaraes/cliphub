@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/thalysguimaraes/cliphub/internal/clipboard"
@@ -8,11 +9,46 @@ import (
 
 // fakeClipboard is an in-memory clipboard for testing.
 type fakeClipboard struct {
+	mu      sync.RWMutex
 	content clipboard.Content
 }
 
-func (f *fakeClipboard) ReadBest() (clipboard.Content, error) { return f.content, nil }
-func (f *fakeClipboard) Write(c clipboard.Content) error       { f.content = c; return nil }
+func (f *fakeClipboard) ReadBest() (clipboard.Content, error) {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	return cloneContent(f.content), nil
+}
+
+func (f *fakeClipboard) Write(c clipboard.Content) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.content = cloneContent(c)
+	return nil
+}
+
+func (f *fakeClipboard) SetContent(c clipboard.Content) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	f.content = cloneContent(c)
+}
+
+func (f *fakeClipboard) Content() clipboard.Content {
+	f.mu.RLock()
+	defer f.mu.RUnlock()
+
+	return cloneContent(f.content)
+}
+
+func cloneContent(c clipboard.Content) clipboard.Content {
+	cloned := c
+	if c.Data != nil {
+		cloned.Data = append([]byte(nil), c.Data...)
+	}
+	return cloned
+}
 
 func textContent(s string) clipboard.Content {
 	return clipboard.Content{MimeType: "text/plain", Data: []byte(s)}
@@ -40,7 +76,7 @@ func TestPollDetectsLocalChange(t *testing.T) {
 	m.Poll()
 	m.MarkSent()
 
-	clip.content = textContent("second")
+	clip.SetContent(textContent("second"))
 	result, ct := m.Poll()
 	if result != PollNewContent || ct.Text() != "second" {
 		t.Fatalf("expected new content 'second', got %v %q", result, ct.Text())
@@ -82,7 +118,7 @@ func TestPollNewContentOverwritesPending(t *testing.T) {
 	m.Poll()
 
 	// User copies something new before retry succeeds.
-	clip.content = textContent("second")
+	clip.SetContent(textContent("second"))
 	result, ct := m.Poll()
 	if result != PollNewContent || ct.Text() != "second" {
 		t.Fatalf("expected new content 'second', got %v %q", result, ct.Text())
@@ -113,7 +149,7 @@ func TestApplyRemoteThenLocalChange(t *testing.T) {
 
 	m.ApplyRemote(textContent("remote"))
 
-	clip.content = textContent("user-copied")
+	clip.SetContent(textContent("user-copied"))
 	result, ct := m.Poll()
 	if result != PollNewContent || ct.Text() != "user-copied" {
 		t.Fatalf("expected new local content, got %v %q", result, ct.Text())
@@ -146,7 +182,7 @@ func TestMultipleRemoteApplies(t *testing.T) {
 		t.Fatalf("expected no change after second remote apply, got %v", result)
 	}
 
-	clip.content = textContent("local-change")
+	clip.SetContent(textContent("local-change"))
 	result, ct := m.Poll()
 	if result != PollNewContent || ct.Text() != "local-change" {
 		t.Fatalf("expected new local content, got %v %q", result, ct.Text())
