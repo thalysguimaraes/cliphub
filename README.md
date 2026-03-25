@@ -15,6 +15,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/go-%3E%3D1.21-00ADD8?logo=go" alt="Go">
+  <a href="https://github.com/thalysguimaraes/cliphub/actions/workflows/ci.yml"><img src="https://github.com/thalysguimaraes/cliphub/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-333" alt="Platforms">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
 </p>
@@ -65,6 +66,21 @@ cd cliphub
 make all    # builds bin/cliphub, bin/clipd, bin/tailclip
 make test   # runs all tests
 ```
+
+## CI
+
+Public CI runs on pull requests and pushes to `main`.
+
+- `go test ./...` runs on Ubuntu, macOS, and Windows.
+- `go build ./cmd/clipd ./cmd/cliphub ./cmd/tailclip` runs on Ubuntu, macOS, and Windows as a native multi-binary smoke build.
+- `go vet ./...` runs on Ubuntu as the stable built-in lint gate.
+- `go test -race ./...` runs on Ubuntu as the race-detection gate.
+- `make release` runs on Ubuntu to smoke-test the current cross-platform release target set.
+
+Platform-specific exclusions:
+
+- Race detection is only required on `ubuntu-latest`; that keeps a single supported race gate in CI while still covering the full package set.
+- `make release` currently cross-builds `cliphub` only for `linux/amd64`, matching the existing release target. The native macOS and Windows smoke-build jobs still compile `cliphub` with `go build ./cmd/...`.
 
 ## Platform support
 

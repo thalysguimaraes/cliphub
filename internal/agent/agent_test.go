@@ -90,7 +90,7 @@ func TestFailedSendRetry(t *testing.T) {
 
 	// 1. Hub is rejecting posts. Set clipboard content.
 	rejectPosts.Store(true)
-	clip.content = textContent("important-data")
+	clip.SetContent(textContent("important-data"))
 
 	// Wait for a few poll cycles — the agent should try and fail.
 	time.Sleep(200 * time.Millisecond)
@@ -167,11 +167,11 @@ func TestFailedSendNewContentOverrides(t *testing.T) {
 
 	// Hub is down. User copies "old".
 	rejectPosts.Store(true)
-	clip.content = textContent("old")
+	clip.SetContent(textContent("old"))
 	time.Sleep(200 * time.Millisecond)
 
 	// User copies "new" while hub is still down.
-	clip.content = textContent("new")
+	clip.SetContent(textContent("new"))
 	time.Sleep(200 * time.Millisecond)
 
 	// Bring hub back.
@@ -235,7 +235,7 @@ func TestBootstrapPreventsStaleOverwrite(t *testing.T) {
 	}
 
 	// The local clipboard should have been updated to "hub-content".
-	local := clip.content
+	local := clip.Content()
 	if local.Text() != "hub-content" {
 		t.Fatalf("expected local clipboard to be 'hub-content', got %q", local.Text())
 	}
@@ -278,10 +278,10 @@ func TestMIMETypeChangeDetected(t *testing.T) {
 	seq1 := h.Seq()
 
 	// Same bytes, different MIME type.
-	clip.content = clipboard.Content{
+	clip.SetContent(clipboard.Content{
 		MimeType: "text/html",
 		Data:     []byte("hello"),
-	}
+	})
 	time.Sleep(200 * time.Millisecond)
 
 	if h.Seq() <= seq1 {
@@ -318,7 +318,7 @@ func TestPauseSourcesBlockRemoteApplyUntilResumed(t *testing.T) {
 			name: "pause file",
 			pause: func(t *testing.T, a *Agent) func() {
 				home := t.TempDir()
-				t.Setenv("HOME", home)
+				setTestHomeDir(t, home)
 				pausedPath := filepath.Join(home, ".config", "cliphub", "paused")
 				if err := os.MkdirAll(filepath.Dir(pausedPath), 0o755); err != nil {
 					t.Fatalf("mkdir pause dir: %v", err)
@@ -349,7 +349,7 @@ func TestPauseSourcesBlockRemoteApplyUntilResumed(t *testing.T) {
 				Content:  "blocked-remote",
 				Source:   "other-node",
 			})
-			if got := clip.content.Text(); got != "" {
+			if got := clip.Content().Text(); got != "" {
 				t.Fatalf("expected paused remote apply to be blocked, got %q", got)
 			}
 
@@ -359,7 +359,7 @@ func TestPauseSourcesBlockRemoteApplyUntilResumed(t *testing.T) {
 				Content:  "after-resume",
 				Source:   "other-node",
 			})
-			if got := clip.content.Text(); got != "after-resume" {
+			if got := clip.Content().Text(); got != "after-resume" {
 				t.Fatalf("expected remote apply after resume, got %q", got)
 			}
 		})
@@ -382,7 +382,7 @@ func TestPauseSourcesBlockLocalCaptureUntilResumed(t *testing.T) {
 			name: "pause file",
 			pause: func(t *testing.T, a *Agent) func() {
 				home := t.TempDir()
-				t.Setenv("HOME", home)
+				setTestHomeDir(t, home)
 				pausedPath := filepath.Join(home, ".config", "cliphub", "paused")
 				if err := os.MkdirAll(filepath.Dir(pausedPath), 0o755); err != nil {
 					t.Fatalf("mkdir pause dir: %v", err)
@@ -453,4 +453,15 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	}
 
 	t.Fatal("condition not satisfied before timeout")
+}
+
+func setTestHomeDir(t *testing.T, home string) {
+	t.Helper()
+
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if volume := filepath.VolumeName(home); volume != "" {
+		t.Setenv("HOMEDRIVE", volume)
+		t.Setenv("HOMEPATH", home[len(volume):])
+	}
 }
