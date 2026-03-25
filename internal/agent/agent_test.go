@@ -338,7 +338,10 @@ func TestPauseSourcesBlockRemoteApplyUntilResumed(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			clip := &fakeClipboard{content: clipboard.Content{}}
-			a := New(Config{NodeName: "test", Clipboard: clip})
+			a, err := New(Config{NodeName: "test", Clipboard: clip})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
 
 			resume := tc.pause(t, a)
 			a.applyRemote(protocol.ClipItem{
@@ -407,12 +410,15 @@ func TestPauseSourcesBlockLocalCaptureUntilResumed(t *testing.T) {
 			defer srv.Close()
 
 			clip := &fakeClipboard{content: textContent("local-while-paused")}
-			a := New(Config{
+			a, err := New(Config{
 				HubURL:       srv.URL,
 				NodeName:     "test",
 				PollInterval: 20 * time.Millisecond,
 				Clipboard:    clip,
 			})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
 			a.bootstrapped.Store(true)
 
 			resume := tc.pause(t, a)
