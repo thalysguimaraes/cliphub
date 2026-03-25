@@ -16,13 +16,15 @@
 <p align="center">
   <img src="https://img.shields.io/badge/go-%3E%3D1.21-00ADD8?logo=go" alt="Go">
   <a href="https://github.com/thalysguimaraes/cliphub/actions/workflows/ci.yml"><img src="https://github.com/thalysguimaraes/cliphub/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
-  <img src="https://img.shields.io/badge/platforms-macOS%20%7C%20Linux%20%7C%20Windows-333" alt="Platforms">
+  <img src="https://img.shields.io/badge/desktop-macOS%20%7C%20Linux%20%7C%20Windows-333" alt="Desktop platforms">
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="License">
 </p>
 
 ---
 
-ClipHub uses a hub-and-spoke architecture: a lightweight broker runs inside your tailnet, and local agents on each machine watch the clipboard and keep everything in sync via WebSocket. No cloud, no accounts — just your tailnet.
+ClipHub uses a hub-and-spoke architecture: a lightweight broker runs inside your tailnet, and local agents on each machine watch the clipboard and keep everything in sync via WebSocket. No cloud, no accounts, and no third-party sync service.
+
+The main supported path today is desktop sync across macOS, Linux, and Windows. This repository also contains an iOS companion app/keyboard/share-extension project with manual setup; see the docs below for the current support boundary.
 
 ## Why
 
@@ -38,6 +40,14 @@ ClipHub uses a hub-and-spoke architecture: a lightweight broker runs inside your
 | `cliphub` | Hub broker. Stores current clip + short history (SQLite), assigns sequence numbers, fans out updates via WebSocket. Runs as a [tsnet](https://tailscale.com/kb/1244/tsnet) node with automatic HTTPS. |
 | `clipd` | Local agent. Polls the clipboard every 500ms, deduplicates by content hash + MIME type, sends new items to the hub, applies remote updates without creating feedback loops. |
 | `tailclip` | CLI. Quick access to get/put/history without running the full agent. |
+
+## Documentation
+
+- [Architecture](docs/architecture.md) explains the hub/agent/CLI/iOS topology, data flow, persistence, and transport modes.
+- [Security & Privacy](docs/security.md) defines the trust boundary, retention model, and what ClipHub does not protect against yet.
+- [Known Limitations](docs/limitations.md) lists the current behavior, content-type, packaging, and operational constraints.
+- [Platform Support](docs/platform-support.md) is the canonical support statement for desktop platforms and the iOS companion.
+- [Roadmap](docs/roadmap.md) tracks the adoption-critical gaps still planned.
 
 ## Quick start
 
@@ -85,14 +95,13 @@ Platform-specific exclusions:
 
 ## Platform support
 
-No CGO required. Clipboard access uses platform-native tools:
+Desktop sync is the main supported path today:
 
-| Platform | Text | HTML | Images | Backend |
-|----------|:----:|:----:|:------:|---------|
-| macOS | yes | yes | yes | `pbcopy`/`pbpaste` + `osascript` (AppKit) |
-| Linux (Wayland) | yes | yes | yes | `wl-copy` / `wl-paste` |
-| Linux (X11) | yes | yes | yes | `xclip` |
-| Windows | yes | - | - | PowerShell clipboard cmdlets |
+- macOS and Linux support `text/plain`, `text/html`, and `image/png`.
+- Windows support is currently limited to `text/plain` in the desktop clipboard backend.
+- The repository also contains an iOS companion app/keyboard/share extension with manual Xcode setup rather than a packaged release flow.
+
+See [Platform Support](docs/platform-support.md) for the canonical matrix and the exact iOS support boundary.
 
 ## Usage
 
@@ -151,20 +160,13 @@ Notes:
 
 ## How it works
 
-1. `clipd` polls the local clipboard, reads the richest available type (image > HTML > text), and computes a SHA-256 hash.
-2. If the hash or MIME type changed and it's not our own echo, POST it to the hub.
-3. The hub assigns a monotonic sequence number, deduplicates by hash + MIME, persists to SQLite, and fans out to all WebSocket subscribers.
-4. Other agents receive the update, write it to their clipboard, read back what the platform stored, and mark it as "self-written" to prevent echo loops.
-5. On reconnect, agents pass `?since_seq=N` to catch up on anything missed while disconnected.
+At a high level:
 
-### Loop prevention
+1. `clipd` watches the local clipboard and sends new content to the hub.
+2. `cliphub` stores the current item plus short history, assigns a sequence number, and fans updates out over WebSocket.
+3. Other clients apply the change locally and recover missed items via `since_seq` after reconnects.
 
-The agent tracks two `(hash, MIME)` pairs:
-
-- **lastWritten** — what we last wrote from a remote update
-- **lastSeen** — what we last read from the clipboard
-
-After writing, the agent reads back the clipboard to handle platform format conversion (e.g., HTML written but read back as plain text). Failed sends don't commit state, so the next poll retries automatically.
+See [Architecture](docs/architecture.md) for the full data flow, trust boundaries, persistence model, and loop-prevention details.
 
 ## API
 
@@ -328,10 +330,13 @@ The agent auto-discovers the hub from your tailnet by default. Set `CLIPHUB_HOST
 
 ## Roadmap
 
-- [x] Phase 1 — Mac/Linux/Windows, text/plain
-- [x] Phase 2 — text/html and images (Mac/Linux)
-- [ ] Phase 3 — iOS app with keyboard extension
-- [ ] Phase 4 — Security filters, app ignore lists, global pause
+The next adoption-critical gaps are:
+
+- turning the existing iOS companion into a clearly supported path,
+- hardening the new privacy controls with clearer coverage, defaults, and cleanup semantics,
+- improving Windows clipboard fidelity and release packaging parity.
+
+See [Roadmap](docs/roadmap.md) for the current framing and [Known Limitations](docs/limitations.md) for the gaps that still apply today.
 
 ## Contributing
 
@@ -343,7 +348,7 @@ Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for set
 
 ## Security
 
-Please do not report vulnerabilities in public issues or pull requests. Use the private reporting instructions in [SECURITY.md](SECURITY.md).
+See [Security & Privacy](docs/security.md) for the product trust model and [SECURITY.md](SECURITY.md) for private vulnerability reporting instructions.
 
 ## License
 
