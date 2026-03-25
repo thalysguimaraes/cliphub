@@ -1,12 +1,73 @@
 package hub
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
+
+func TestStoreRecoversFromInterruptedLegacyWrite(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "legacy.db")
+
+	db, err := sql.Open("sqlite", dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = db.Exec(`
+		CREATE TABLE clips (
+			seq        INTEGER PRIMARY KEY,
+			mime_type  TEXT    NOT NULL,
+			content    TEXT,
+			data       BLOB,
+			hash       TEXT    NOT NULL,
+			source     TEXT    NOT NULL,
+			created_at TEXT    NOT NULL,
+			expires_at TEXT    NOT NULL
+		);
+		CREATE TABLE meta (
+			key   TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		);
+	`)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	_, err = db.Exec(
+		"INSERT INTO clips (seq, mime_type, content, data, hash, source, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+		7, "text/plain", "persisted clip", nil, protocol.HashContent("persisted clip"), "node1",
+		now.Format(time.RFC3339Nano), now.Add(time.Hour).Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	seq, items, err := s.LoadState(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq != 7 {
+		t.Fatalf("expected recovered seq 7 to match persisted clip history, got %d", seq)
+	}
+	if len(items) != 1 || items[0].Seq != 7 || items[0].Content != "persisted clip" {
+		t.Fatalf("expected recovered persisted clip, got %+v", items)
+	}
+}
 
 func TestStoreRoundTrip(t *testing.T) {
 	dir := t.TempDir()
@@ -27,7 +88,7 @@ func TestStoreRoundTrip(t *testing.T) {
 		ExpiresAt: now.Add(time.Hour),
 	}
 
-	if err := s.SaveItem(item); err != nil {
+	if _, err := s.SaveItem(item); err != nil {
 		t.Fatal(err)
 	}
 
@@ -54,7 +115,6 @@ func TestStoreBinaryRoundTrip(t *testing.T) {
 	now := time.Now()
 	data := []byte{0x89, 0x50, 0x4e, 0x47}
 	item := protocol.ClipItem{
-		Seq:       1,
 		MimeType:  "image/png",
 		Data:      data,
 		Hash:      protocol.HashBytes(data),
@@ -63,8 +123,12 @@ func TestStoreBinaryRoundTrip(t *testing.T) {
 		ExpiresAt: now.Add(time.Hour),
 	}
 
-	if err := s.SaveItem(item); err != nil {
+	saved, err := s.SaveItem(item)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if saved.Seq != 1 {
+		t.Fatalf("expected auto-assigned seq 1, got %d", saved.Seq)
 	}
 
 	_, items, err := s.LoadState(50)
@@ -85,14 +149,18 @@ func TestStoreDeleteExpired(t *testing.T) {
 	defer s.Close()
 
 	now := time.Now()
-	s.SaveItem(protocol.ClipItem{
+	if _, err := s.SaveItem(protocol.ClipItem{
 		Seq: 1, MimeType: "text/plain", Content: "expired", Hash: "a",
 		Source: "n", CreatedAt: now, ExpiresAt: now.Add(-time.Hour),
-	})
-	s.SaveItem(protocol.ClipItem{
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SaveItem(protocol.ClipItem{
 		Seq: 2, MimeType: "text/plain", Content: "alive", Hash: "b",
 		Source: "n", CreatedAt: now, ExpiresAt: now.Add(time.Hour),
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	n, err := s.DeleteExpired(now)
 	if err != nil {
@@ -113,10 +181,12 @@ func TestStorePersistsAcrossReopen(t *testing.T) {
 	dbPath := filepath.Join(dir, "test.db")
 
 	s, _ := OpenStore(dbPath)
-	s.SaveItem(protocol.ClipItem{
+	if _, err := s.SaveItem(protocol.ClipItem{
 		Seq: 10, MimeType: "text/plain", Content: "persisted", Hash: "x",
 		Source: "n", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour),
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 	s.Close()
 
 	s2, _ := OpenStore(dbPath)
@@ -128,6 +198,75 @@ func TestStorePersistsAcrossReopen(t *testing.T) {
 	}
 	if len(items) != 1 || items[0].Content != "persisted" {
 		t.Fatal("data not persisted across reopen")
+	}
+}
+
+func TestStoreSequenceSurvivesHistoryDeletionAcrossReopen(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	s, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Now().UTC()
+	first, err := s.SaveItem(protocol.ClipItem{
+		MimeType:  "text/plain",
+		Content:   "first",
+		Hash:      protocol.HashContent("first"),
+		Source:    "node1",
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Seq != 1 {
+		t.Fatalf("expected first seq 1, got %d", first.Seq)
+	}
+
+	n, err := s.DeleteExpired(now.Add(2 * time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 deleted row, got %d", n)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	s2, err := OpenStore(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+
+	seq, items, err := s2.LoadState(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq != 1 {
+		t.Fatalf("expected seq 1 to survive reopen after history deletion, got %d", seq)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected empty history after deletion, got %+v", items)
+	}
+
+	second, err := s2.SaveItem(protocol.ClipItem{
+		MimeType:  "text/plain",
+		Content:   "second",
+		Hash:      protocol.HashContent("second"),
+		Source:    "node1",
+		CreatedAt: now.Add(2 * time.Minute),
+		ExpiresAt: now.Add(3 * time.Minute),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Seq != 2 {
+		t.Fatalf("expected next seq 2 after deleted history reopen, got %d", second.Seq)
 	}
 }
 

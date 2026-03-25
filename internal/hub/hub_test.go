@@ -42,10 +42,10 @@ func (s *blockingStore) LoadState(int) (uint64, []protocol.ClipItem, error) {
 	return 0, nil, nil
 }
 
-func (s *blockingStore) SaveItem(item protocol.ClipItem) error {
+func (s *blockingStore) SaveItem(item protocol.ClipItem) (protocol.ClipItem, error) {
 	s.saveStarted <- item
 	<-s.releaseSave
-	return nil
+	return item, nil
 }
 
 func (s *blockingStore) DeleteExpired(time.Time) (int, error) {

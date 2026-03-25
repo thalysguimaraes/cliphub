@@ -48,7 +48,7 @@ type Hub struct {
 type clipStore interface {
 	Close() error
 	LoadState(maxHistory int) (uint64, []protocol.ClipItem, error)
-	SaveItem(item protocol.ClipItem) error
+	SaveItem(item protocol.ClipItem) (protocol.ClipItem, error)
 	DeleteExpired(before time.Time) (int, error)
 }
 
@@ -145,7 +145,6 @@ func (h *Hub) Put(in PutInput) (protocol.ClipItem, bool) {
 		h.history = h.history[:h.maxHistory]
 	}
 	h.mu.Unlock()
-
 	h.publish(item)
 	return cloneClipItem(item), true
 }
@@ -246,7 +245,7 @@ func (h *Hub) publish(item protocol.ClipItem) {
 	}
 
 	if h.store != nil {
-		if err := h.store.SaveItem(item); err != nil {
+		if _, err := h.store.SaveItem(item); err != nil {
 			slog.Error("failed to persist clip", "seq", item.Seq, "err", err)
 		}
 	}

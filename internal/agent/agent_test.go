@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -15,6 +16,33 @@ import (
 	"github.com/thalysguimaraes/cliphub/internal/hub"
 	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
+
+func TestNewReturnsClipboardInitError(t *testing.T) {
+	wantErr := errors.New("clipboard unavailable")
+	origNewClipboard := newClipboard
+	newClipboard = func() (clipboard.Clipboard, error) {
+		return nil, wantErr
+	}
+	t.Cleanup(func() {
+		newClipboard = origNewClipboard
+	})
+
+	a, err := New(Config{HubURL: "http://example.com", NodeName: "test"})
+	if err == nil {
+		t.Fatal("expected clipboard init error")
+	}
+	if a != nil {
+		t.Fatal("expected agent to be nil on init failure")
+	}
+
+	var initErr *ClipboardInitError
+	if !errors.As(err, &initErr) {
+		t.Fatalf("expected ClipboardInitError, got %T", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected wrapped error %v, got %v", wantErr, err)
+	}
+}
 
 // TestFailedSendRetry is a regression test for the exact failed-send replay
 // path. It verifies that when the hub is unreachable during POST /api/clip,
@@ -43,12 +71,15 @@ func TestFailedSendRetry(t *testing.T) {
 	defer srv.Close()
 
 	clip := &fakeClipboard{content: clipboard.Content{}}
-	a := New(Config{
+	a, err := New(Config{
 		HubURL:       srv.URL,
 		NodeName:     "test",
 		PollInterval: 50 * time.Millisecond,
 		Clipboard:    clip,
 	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 	// Skip bootstrap (hub is empty).
 	a.bootstrapped.Store(true)
 
@@ -118,12 +149,15 @@ func TestFailedSendNewContentOverrides(t *testing.T) {
 	defer srv.Close()
 
 	clip := &fakeClipboard{content: clipboard.Content{}}
-	a := New(Config{
+	a, err := New(Config{
 		HubURL:       srv.URL,
 		NodeName:     "test",
 		PollInterval: 50 * time.Millisecond,
 		Clipboard:    clip,
 	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 	a.bootstrapped.Store(true)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -174,12 +208,15 @@ func TestBootstrapPreventsStaleOverwrite(t *testing.T) {
 
 	// Local clipboard has stale content.
 	clip := &fakeClipboard{content: textContent("stale-local")}
-	a := New(Config{
+	a, err := New(Config{
 		HubURL:       srv.URL,
 		NodeName:     "test",
 		PollInterval: 50 * time.Millisecond,
 		Clipboard:    clip,
 	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -217,12 +254,15 @@ func TestMIMETypeChangeDetected(t *testing.T) {
 		MimeType: "text/plain",
 		Data:     []byte("hello"),
 	}}
-	a := New(Config{
+	a, err := New(Config{
 		HubURL:       srv.URL,
 		NodeName:     "test",
 		PollInterval: 50 * time.Millisecond,
 		Clipboard:    clip,
 	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
 	a.bootstrapped.Store(true)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -298,7 +338,10 @@ func TestPauseSourcesBlockRemoteApplyUntilResumed(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			clip := &fakeClipboard{content: clipboard.Content{}}
-			a := New(Config{NodeName: "test", Clipboard: clip})
+			a, err := New(Config{NodeName: "test", Clipboard: clip})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
 
 			resume := tc.pause(t, a)
 			a.applyRemote(protocol.ClipItem{
@@ -367,12 +410,15 @@ func TestPauseSourcesBlockLocalCaptureUntilResumed(t *testing.T) {
 			defer srv.Close()
 
 			clip := &fakeClipboard{content: textContent("local-while-paused")}
-			a := New(Config{
+			a, err := New(Config{
 				HubURL:       srv.URL,
 				NodeName:     "test",
 				PollInterval: 20 * time.Millisecond,
 				Clipboard:    clip,
 			})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
 			a.bootstrapped.Store(true)
 
 			resume := tc.pause(t, a)
