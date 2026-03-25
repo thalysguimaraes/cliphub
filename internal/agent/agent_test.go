@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -258,4 +260,151 @@ func handler(mux *http.ServeMux) http.Handler {
 func init() {
 	// Suppress noisy logs during tests.
 	_ = json.Unmarshal
+}
+
+func TestPauseSourcesBlockRemoteApplyUntilResumed(t *testing.T) {
+	tests := []struct {
+		name  string
+		pause func(t *testing.T, a *Agent) func()
+	}{
+		{
+			name: "in-memory pause",
+			pause: func(t *testing.T, a *Agent) func() {
+				a.paused.Store(true)
+				return func() { a.paused.Store(false) }
+			},
+		},
+		{
+			name: "pause file",
+			pause: func(t *testing.T, a *Agent) func() {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				pausedPath := filepath.Join(home, ".config", "cliphub", "paused")
+				if err := os.MkdirAll(filepath.Dir(pausedPath), 0o755); err != nil {
+					t.Fatalf("mkdir pause dir: %v", err)
+				}
+				if err := os.WriteFile(pausedPath, []byte("paused\n"), 0o644); err != nil {
+					t.Fatalf("write pause file: %v", err)
+				}
+				return func() {
+					if err := os.Remove(pausedPath); err != nil && !os.IsNotExist(err) {
+						t.Fatalf("remove pause file: %v", err)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clip := &fakeClipboard{content: clipboard.Content{}}
+			a := New(Config{NodeName: "test", Clipboard: clip})
+
+			resume := tc.pause(t, a)
+			a.applyRemote(protocol.ClipItem{
+				MimeType: "text/plain",
+				Content:  "blocked-remote",
+				Source:   "other-node",
+			})
+			if got := clip.content.Text(); got != "" {
+				t.Fatalf("expected paused remote apply to be blocked, got %q", got)
+			}
+
+			resume()
+			a.applyRemote(protocol.ClipItem{
+				MimeType: "text/plain",
+				Content:  "after-resume",
+				Source:   "other-node",
+			})
+			if got := clip.content.Text(); got != "after-resume" {
+				t.Fatalf("expected remote apply after resume, got %q", got)
+			}
+		})
+	}
+}
+
+func TestPauseSourcesBlockLocalCaptureUntilResumed(t *testing.T) {
+	tests := []struct {
+		name  string
+		pause func(t *testing.T, a *Agent) func()
+	}{
+		{
+			name: "in-memory pause",
+			pause: func(t *testing.T, a *Agent) func() {
+				a.paused.Store(true)
+				return func() { a.paused.Store(false) }
+			},
+		},
+		{
+			name: "pause file",
+			pause: func(t *testing.T, a *Agent) func() {
+				home := t.TempDir()
+				t.Setenv("HOME", home)
+				pausedPath := filepath.Join(home, ".config", "cliphub", "paused")
+				if err := os.MkdirAll(filepath.Dir(pausedPath), 0o755); err != nil {
+					t.Fatalf("mkdir pause dir: %v", err)
+				}
+				if err := os.WriteFile(pausedPath, []byte("paused\n"), 0o644); err != nil {
+					t.Fatalf("write pause file: %v", err)
+				}
+				return func() {
+					if err := os.Remove(pausedPath); err != nil && !os.IsNotExist(err) {
+						t.Fatalf("remove pause file: %v", err)
+					}
+				}
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h, _ := hub.New(hub.Config{MaxHistory: 10, TTL: time.Hour})
+			mux := http.NewServeMux()
+			hub.Register(mux, h, func(r *http.Request) string {
+				return r.Header.Get("X-Clip-Source")
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+
+			clip := &fakeClipboard{content: textContent("local-while-paused")}
+			a := New(Config{
+				HubURL:       srv.URL,
+				NodeName:     "test",
+				PollInterval: 20 * time.Millisecond,
+				Clipboard:    clip,
+			})
+			a.bootstrapped.Store(true)
+
+			resume := tc.pause(t, a)
+
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			go a.Run(ctx)
+
+			time.Sleep(120 * time.Millisecond)
+			if item := h.Get(); item != nil {
+				t.Fatalf("expected no local capture while paused, got %q", item.Content)
+			}
+
+			resume()
+			waitFor(t, 500*time.Millisecond, func() bool {
+				item := h.Get()
+				return item != nil && item.Content == "local-while-paused"
+			})
+		})
+	}
+}
+
+func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
+	t.Helper()
+
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	t.Fatal("condition not satisfied before timeout")
 }

@@ -91,7 +91,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-ticker.C:
-			if a.paused.Load() || a.isPausedByFile() {
+			if a.isPaused() {
 				continue
 			}
 			if !a.bootstrapped.Load() {
@@ -175,7 +175,7 @@ func (a *Agent) tryBootstrap(ctx context.Context) bool {
 }
 
 func (a *Agent) applyRemote(item protocol.ClipItem) {
-	if a.paused.Load() {
+	if a.isPaused() {
 		return
 	}
 	if item.Source == a.nodeName {
@@ -189,6 +189,10 @@ func (a *Agent) applyRemote(item protocol.ClipItem) {
 	} else {
 		slog.Info("applied remote clip", "seq", item.Seq, "source", item.Source, "mime", item.MimeType)
 	}
+}
+
+func (a *Agent) isPaused() bool {
+	return a.paused.Load() || a.isPausedByFile()
 }
 
 func (a *Agent) sendToHub(ctx context.Context, ct clipboard.Content) error {
