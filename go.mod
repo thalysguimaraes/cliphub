@@ -4,6 +4,7 @@ go 1.26.1
 
 require (
 	github.com/coder/websocket v1.8.14
+	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 	tailscale.com v1.96.1
 )

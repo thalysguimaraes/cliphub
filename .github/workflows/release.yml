@@ -35,7 +35,7 @@ jobs:
       - name: Verify release assets
         run: make release-verify VERSION=${{ github.ref_name }}
 
-      - name: Publish GitHub release assets
+      - name: Publish core GitHub release assets
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
@@ -52,4 +52,44 @@ jobs:
               --title "$RELEASE_TAG" \
               --notes-file "$notes_file" \
               --verify-tag
+          fi
+
+      - name: Generate package-manager metadata from published release assets
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          manifest_url="https://github.com/thalysguimaraes/cliphub/releases/download/${RELEASE_TAG}/cliphub_${RELEASE_TAG}_artifacts.json"
+          checksums_url="https://github.com/thalysguimaraes/cliphub/releases/download/${RELEASE_TAG}/cliphub_${RELEASE_TAG}_checksums.txt"
+
+          make release-package-managers \
+            VERSION="${RELEASE_TAG}" \
+            RELEASE_MANIFEST="${manifest_url}" \
+            RELEASE_CHECKSUMS="${checksums_url}"
+
+      - name: Verify package-manager metadata
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          manifest_url="https://github.com/thalysguimaraes/cliphub/releases/download/${RELEASE_TAG}/cliphub_${RELEASE_TAG}_artifacts.json"
+          checksums_url="https://github.com/thalysguimaraes/cliphub/releases/download/${RELEASE_TAG}/cliphub_${RELEASE_TAG}_checksums.txt"
+
+          make release-package-managers-verify \
+            VERSION="${RELEASE_TAG}" \
+            RELEASE_MANIFEST="${manifest_url}" \
+            RELEASE_CHECKSUMS="${checksums_url}"
+
+      - name: Publish package-manager metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+
+          mapfile -d '' files < <(find dist/release/package-managers -type f -print0 | sort -z)
+          if [ "${#files[@]}" -gt 0 ]; then
+            gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
           fi
