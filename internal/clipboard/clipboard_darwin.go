@@ -94,6 +94,15 @@ pb's setData:fileData forType:"%s"
 	return exec.Command("osascript", "-e", script).Run()
 }
 
+func (c *darwinClipboard) Clear() error {
+	script := `
+use framework "AppKit"
+set pb to current application's NSPasteboard's generalPasteboard()
+pb's clearContents()
+`
+	return exec.Command("osascript", "-e", script).Run()
+}
+
 func (c *darwinClipboard) listTypes() ([]string, error) {
 	script := `
 use framework "AppKit"

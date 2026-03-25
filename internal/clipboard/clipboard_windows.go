@@ -28,3 +28,7 @@ func (c *windowsClipboard) Write(ct Content) error {
 	cmd.Stdin = bytes.NewReader(ct.Data)
 	return cmd.Run()
 }
+
+func (c *windowsClipboard) Clear() error {
+	return exec.Command("powershell", "-command", "Set-Clipboard -Value $null").Run()
+}

@@ -36,6 +36,15 @@ Examples include:
 
 If you are not sure whether something is security-sensitive, report it privately anyway.
 
+## Operational privacy limitations
+
+ClipHub now exposes opt-in privacy controls for ignore lists, sensitive-content filtering, and explicit clear behavior, but a few limitations remain important:
+
+- Privacy filters are not enabled by default. Operators must opt in with `clipd` flags or environment variables.
+- Clipboard history on the hub is stored as plain SQLite, and the iOS cache is stored as plain JSON. ClipHub does not yet add application-layer encryption on top of OS disk encryption and file permissions.
+- App/process ignore rules are best-effort because they rely on foreground-window detection. On Linux, that currently requires `xdotool` to resolve the active process.
+- `tailclip clear` clears hub state and persisted history, and `tailclip clear --local` also clears the invoking machine's system clipboard. This does not retroactively wipe clipboard contents already written to other devices or offline caches.
+
 ## Non-security bugs
 
 If the issue does not need private handling, please use the public GitHub issue templates so the report can be triaged in the open.

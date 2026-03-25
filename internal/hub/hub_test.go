@@ -60,6 +60,10 @@ func (s *blockingStore) DeleteExpired(time.Time) (int, error) {
 	return 0, nil
 }
 
+func (s *blockingStore) DeleteAll() error {
+	return nil
+}
+
 func (s *blockingStore) allowOneSave() {
 	s.releaseSave <- struct{}{}
 }
@@ -216,6 +220,26 @@ func TestHistoryLimit(t *testing.T) {
 	hist := h.History(3)
 	if len(hist) != 3 {
 		t.Fatalf("expected 3 items, got %d", len(hist))
+	}
+}
+
+func TestClearRemovesCurrentAndHistory(t *testing.T) {
+	h := newTestHub()
+	h.Put(textInput("one", "node1"))
+	h.Put(textInput("two", "node2"))
+
+	if err := h.Clear(); err != nil {
+		t.Fatalf("Clear() error = %v", err)
+	}
+
+	if got := h.Get(); got != nil {
+		t.Fatalf("expected cleared current clip, got %+v", got)
+	}
+	if hist := h.History(0); len(hist) != 0 {
+		t.Fatalf("expected empty history after clear, got %+v", hist)
+	}
+	if h.Seq() != 2 {
+		t.Fatalf("expected clear to preserve seq 2, got %d", h.Seq())
 	}
 }
 

@@ -176,6 +176,42 @@ func TestStoreDeleteExpired(t *testing.T) {
 	}
 }
 
+func TestStoreDeleteAll(t *testing.T) {
+	dir := t.TempDir()
+	s, err := OpenStore(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	now := time.Now()
+	if _, err := s.SaveItem(protocol.ClipItem{
+		MimeType:  "text/plain",
+		Content:   "persisted",
+		Hash:      protocol.HashContent("persisted"),
+		Source:    "node1",
+		CreatedAt: now,
+		ExpiresAt: now.Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteAll(); err != nil {
+		t.Fatal(err)
+	}
+
+	seq, items, err := s.LoadState(50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seq != 1 {
+		t.Fatalf("expected sqlite sequence to remain 1 after delete all, got %d", seq)
+	}
+	if len(items) != 0 {
+		t.Fatalf("expected empty history after delete all, got %+v", items)
+	}
+}
+
 func TestStorePersistsAcrossReopen(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")

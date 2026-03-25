@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log/slog"
 	"net"
@@ -10,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/thalysguimaraes/cliphub/internal/discover"
@@ -29,7 +31,7 @@ func main() {
 	dbPath := ""
 	if !*dev {
 		if err := os.MkdirAll(*stateDir, 0o700); err != nil {
-			slog.Error("create state dir failed", "err", err, "dir", *stateDir)
+			slog.Error("create state dir failed", "component", "cliphub", "error", err, "state_dir", *stateDir)
 			os.Exit(1)
 		}
 		dbPath = filepath.Join(*stateDir, "clips.db")
@@ -41,12 +43,17 @@ func main() {
 		DBPath:     dbPath,
 	})
 	if err != nil {
-		slog.Error("hub init failed", "err", err)
+		slog.Error("hub init failed", "component", "cliphub", "error", err)
 		os.Exit(1)
 	}
-	defer h.Close()
+	defer func() {
+		if err := h.Close(); err != nil {
+			slog.Error("hub close failed", "component", "cliphub", "error", err)
+		}
+	}()
 
 	mux := http.NewServeMux()
+	obs := hub.NewObserver()
 
 	var ln net.Listener
 
@@ -56,14 +63,14 @@ func main() {
 				return name
 			}
 			return "dev"
-		})
+		}, obs)
 
 		ln, err = net.Listen("tcp", *addr)
 		if err != nil {
-			slog.Error("listen failed", "err", err)
+			slog.Error("listen failed", "component", "cliphub", "error", err, "listen_addr", *addr)
 			os.Exit(1)
 		}
-		slog.Info("cliphub dev mode", "addr", *addr)
+		slog.Info("cliphub dev mode", "component", "cliphub", "listen_addr", *addr)
 	} else {
 		srv := &tsnet.Server{
 			Hostname: *hostname,
@@ -75,18 +82,18 @@ func main() {
 		// Fall back to plain HTTP if HTTPS is not configured.
 		ln, err = srv.ListenTLS("tcp", ":443")
 		if err != nil {
-			slog.Warn("TLS listen failed, falling back to plain HTTP", "err", err)
+			slog.Warn("TLS listen failed; falling back to plain HTTP", "component", "cliphub", "error", err)
 			ln, err = srv.Listen("tcp", ":80")
 			if err != nil {
-				slog.Error("tsnet listen failed", "err", err)
+				slog.Error("tsnet listen failed", "component", "cliphub", "error", err)
 				os.Exit(1)
 			}
-			slog.Info("cliphub listening on tailnet (plain HTTP)", "hostname", *hostname)
+			slog.Info("cliphub listening on tailnet (plain HTTP)", "component", "cliphub", "hostname", *hostname)
 		}
 
 		lc, err := srv.LocalClient()
 		if err != nil {
-			slog.Error("tsnet local client failed", "err", err)
+			slog.Error("tsnet local client failed", "component", "cliphub", "error", err)
 			os.Exit(1)
 		}
 
@@ -96,9 +103,9 @@ func main() {
 				return "unknown"
 			}
 			return who.Node.ComputedName
-		})
+		}, obs)
 
-		slog.Info("cliphub listening on tailnet", "hostname", *hostname, "state_dir", *stateDir)
+		slog.Info("cliphub listening on tailnet", "component", "cliphub", "hostname", *hostname, "state_dir", *stateDir)
 	}
 
 	server := &http.Server{
@@ -106,17 +113,40 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
+	defer signal.Stop(sigCh)
+
+	serveErrCh := make(chan error, 1)
 	go func() {
-		sig := make(chan os.Signal, 1)
-		signal.Notify(sig, os.Interrupt)
-		<-sig
-		slog.Info("shutting down")
-		server.Close()
+		serveErrCh <- server.Serve(ln)
 	}()
 
-	if err := server.Serve(ln); err != nil && err != http.ErrServerClosed {
-		slog.Error("server error", "err", err)
-		os.Exit(1)
+	select {
+	case sig := <-sigCh:
+		obs.BeginShutdown()
+		slog.Info("shutdown requested", "component", "cliphub", "signal", sig.String())
+
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			slog.Error("graceful shutdown failed", "component", "cliphub", "error", err)
+			if closeErr := server.Close(); closeErr != nil {
+				slog.Error("server close failed", "component", "cliphub", "error", closeErr)
+			}
+			os.Exit(1)
+		}
+
+		if err := <-serveErrCh; err != nil && err != http.ErrServerClosed {
+			slog.Error("server error", "component", "cliphub", "error", err)
+			os.Exit(1)
+		}
+	case err := <-serveErrCh:
+		if err != nil && err != http.ErrServerClosed {
+			slog.Error("server error", "component", "cliphub", "error", err)
+			os.Exit(1)
+		}
 	}
 }
 

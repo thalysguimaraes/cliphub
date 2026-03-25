@@ -15,7 +15,7 @@ import (
 type WSClient struct {
 	URL         string
 	OnUpdate    func(protocol.ClipItem)
-	OnConnected func() // Called on first connect only.
+	OnConnected func() // Called after each successful connect.
 	lastSeq     uint64 // Tracks last seq received for reconnect catch-up.
 }
 
@@ -29,7 +29,7 @@ func (c *WSClient) Run(ctx context.Context) {
 			if ctx.Err() != nil {
 				return
 			}
-			slog.Warn("websocket disconnected", "err", err, "retry_in", backoff)
+			slog.Warn("websocket disconnected", "component", "clipd_stream", "error", err, "retry_delay", backoff)
 			select {
 			case <-ctx.Done():
 				return
@@ -54,7 +54,7 @@ func (c *WSClient) connect(ctx context.Context) error {
 	}
 	defer conn.CloseNow()
 
-	slog.Info("connected to hub", "url", url)
+	slog.Info("connected to hub", "component", "clipd_stream", "hub_stream_url", url)
 
 	if c.OnConnected != nil {
 		c.OnConnected()

@@ -47,6 +47,17 @@ func (c *linuxClipboard) Write(ct Content) error {
 	}
 }
 
+func (c *linuxClipboard) Clear() error {
+	switch c.backend {
+	case "wayland":
+		return exec.Command("wl-copy", "--clear").Run()
+	default:
+		cmd := exec.Command("xclip", "-selection", "clipboard")
+		cmd.Stdin = strings.NewReader("")
+		return cmd.Run()
+	}
+}
+
 func (c *linuxClipboard) listTypes() ([]string, error) {
 	var cmd *exec.Cmd
 	switch c.backend {

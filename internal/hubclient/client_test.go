@@ -272,6 +272,39 @@ func TestStructuredHTTPErrorParsing(t *testing.T) {
 	}
 }
 
+func TestClearUsesDeleteEndpoint(t *testing.T) {
+	var seenMethod string
+	var seenPath string
+
+	client, err := New(Config{
+		BaseURL: "http://example.com/root",
+		HTTPClient: &http.Client{
+			Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				seenMethod = req.Method
+				seenPath = req.URL.Path
+				return &http.Response{
+					StatusCode: http.StatusNoContent,
+					Body:       http.NoBody,
+					Header:     make(http.Header),
+				}, nil
+			}),
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+
+	if err := client.Clear(context.Background()); err != nil {
+		t.Fatalf("Clear() error = %v", err)
+	}
+	if seenMethod != http.MethodDelete {
+		t.Fatalf("expected DELETE, got %s", seenMethod)
+	}
+	if seenPath != "/root/api/clip" {
+		t.Fatalf("unexpected request path %q", seenPath)
+	}
+}
+
 func TestCurrentNoContent(t *testing.T) {
 	client, err := New(Config{
 		BaseURL: "http://example.com",

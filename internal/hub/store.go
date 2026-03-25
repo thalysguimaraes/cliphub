@@ -175,6 +175,13 @@ func (s *Store) DeleteExpired(before time.Time) (int, error) {
 	return int(n), nil
 }
 
+// DeleteAll removes all persisted clipboard history while preserving the
+// AUTOINCREMENT sequence so future clips remain monotonic.
+func (s *Store) DeleteAll() error {
+	_, err := s.db.Exec("DELETE FROM clips")
+	return err
+}
+
 const clipsTableDDL = `
 	CREATE TABLE clips (
 		seq        INTEGER PRIMARY KEY AUTOINCREMENT,
