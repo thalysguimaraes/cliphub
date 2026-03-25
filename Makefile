@@ -1,7 +1,7 @@
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 
-.PHONY: all cliphub clipd tailclip test lint clean
+.PHONY: all cliphub clipd tailclip test test-race lint clean
 
 all: cliphub clipd tailclip
 
@@ -16,6 +16,9 @@ tailclip:
 
 test:
 	go test ./...
+
+test-race:
+	go test -race ./...
 
 lint:
 	go vet ./...

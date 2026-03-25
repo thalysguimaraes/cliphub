@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -17,13 +20,19 @@ import (
 func devIdentity(r *http.Request) string { return "test-node" }
 
 func setupServer(t *testing.T) (*Hub, *httptest.Server) {
+	h, _, srv := setupServerWithObserver(t)
+	return h, srv
+}
+
+func setupServerWithObserver(t *testing.T) (*Hub, *Observer, *httptest.Server) {
 	t.Helper()
 	h := newTestHub()
+	obs := NewObserver()
 	mux := http.NewServeMux()
-	Register(mux, h, devIdentity)
+	Register(mux, h, devIdentity, obs)
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return h, srv
+	return h, obs, srv
 }
 
 func TestPostAndGetClip(t *testing.T) {
@@ -171,6 +180,9 @@ func TestStatus(t *testing.T) {
 	if _, ok := status["uptime"]; !ok {
 		t.Fatal("missing uptime")
 	}
+	if _, ok := status["ready"]; !ok {
+		t.Fatal("missing ready")
+	}
 }
 
 func TestWebSocketStream(t *testing.T) {
@@ -237,5 +249,151 @@ func TestWebSocketStreamReplaySinceSeq(t *testing.T) {
 	}
 	if live.Type != "clip_update" || live.Item == nil || live.Item.Seq != 3 || live.Item.Content != "third" {
 		t.Fatalf("unexpected live message after replay: %+v", live)
+	}
+}
+
+func TestHealthReadinessAndMetrics(t *testing.T) {
+	_, obs, srv := setupServerWithObserver(t)
+
+	post := func(body string) {
+		t.Helper()
+		resp, err := http.Post(srv.URL+"/api/clip", "application/json", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+
+	healthResp, err := http.Get(srv.URL + "/healthz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if healthResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected healthz 200, got %d", healthResp.StatusCode)
+	}
+	if requestID := healthResp.Header.Get("X-Request-ID"); requestID == "" {
+		t.Fatal("expected X-Request-ID header on healthz")
+	}
+	var health map[string]any
+	if err := json.NewDecoder(healthResp.Body).Decode(&health); err != nil {
+		t.Fatal(err)
+	}
+	healthResp.Body.Close()
+	if ready, ok := health["ready"].(bool); !ok || !ready {
+		t.Fatalf("expected health ready=true, got %#v", health["ready"])
+	}
+
+	readyResp, err := http.Get(srv.URL + "/readyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readyResp.StatusCode != http.StatusOK {
+		t.Fatalf("expected readyz 200, got %d", readyResp.StatusCode)
+	}
+	readyResp.Body.Close()
+
+	post(`{"content":"operable"}`)
+	post(`{"content":"operable"}`)
+
+	metricsResp, err := http.Get(srv.URL + "/metrics")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(metricsResp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	metricsResp.Body.Close()
+
+	metrics := string(body)
+	for _, expected := range []string{
+		"cliphub_ready 1",
+		"cliphub_clips_stored_total 1",
+		"cliphub_clips_deduplicated_total 1",
+		"cliphub_http_requests_total",
+	} {
+		if !strings.Contains(metrics, expected) {
+			t.Fatalf("expected metrics to contain %q, got %s", expected, metrics)
+		}
+	}
+
+	obs.BeginShutdown()
+	notReadyResp, err := http.Get(srv.URL + "/readyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notReadyResp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected readyz 503 after shutdown, got %d", notReadyResp.StatusCode)
+	}
+	notReadyResp.Body.Close()
+}
+
+func TestLifecycleShutdownClosesStreams(t *testing.T) {
+	h := newTestHub()
+	obs := NewObserver()
+	mux := http.NewServeMux()
+	Register(mux, h, devIdentity, obs)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := &http.Server{Handler: mux}
+	serveDone := make(chan error, 1)
+	go func() {
+		serveDone <- server.Serve(ln)
+	}()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	})
+
+	baseURL := "http://" + ln.Addr().String()
+	wsURL := "ws://" + ln.Addr().String() + "/api/clip/stream"
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, _, err := websocket.Dial(ctx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.CloseNow()
+
+	obs.BeginShutdown()
+
+	resp, err := http.Get(baseURL + "/readyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("expected readyz 503 after shutdown, got %d", resp.StatusCode)
+	}
+	resp.Body.Close()
+
+	readErr := make(chan error, 1)
+	go func() {
+		var msg protocol.WSMessage
+		readErr <- wsjson.Read(ctx, conn, &msg)
+	}()
+
+	select {
+	case err := <-readErr:
+		if err == nil {
+			t.Fatal("expected websocket read to fail after shutdown")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for websocket shutdown")
+	}
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer shutdownCancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("shutdown error = %v", err)
+	}
+
+	if err := <-serveDone; err != nil && err != http.ErrServerClosed {
+		t.Fatalf("serve returned unexpected error %v", err)
 	}
 }
