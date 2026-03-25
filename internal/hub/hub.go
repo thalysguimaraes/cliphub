@@ -83,7 +83,7 @@ func New(cfg Config) (*Hub, error) {
 		if len(items) > 0 {
 			h.current = &items[0]
 		}
-		slog.Info("loaded state from db", "seq", seq, "items", len(items))
+		slog.Info("loaded state from db", "component", "hub_store", "sequence", seq, "history_items", len(items))
 	}
 
 	h.publishCond = sync.NewCond(&h.publishMu)
@@ -246,7 +246,7 @@ func (h *Hub) publish(item protocol.ClipItem) {
 
 	if h.store != nil {
 		if _, err := h.store.SaveItem(item); err != nil {
-			slog.Error("failed to persist clip", "seq", item.Seq, "err", err)
+			slog.Error("failed to persist clip", "component", "hub_store", "sequence", item.Seq, "error", err)
 		}
 	}
 
@@ -309,7 +309,7 @@ func (h *Hub) reapExpired() {
 
 	if h.current != nil && now.After(h.current.ExpiresAt) {
 		h.current = nil
-		slog.Info("current clip expired")
+		slog.Info("current clip expired", "component", "hub_ttl")
 	}
 
 	kept := h.history[:0]
@@ -319,16 +319,16 @@ func (h *Hub) reapExpired() {
 		}
 	}
 	if reaped := len(h.history) - len(kept); reaped > 0 {
-		slog.Info("reaped expired clips", "count", reaped)
+		slog.Info("reaped expired clips", "component", "hub_ttl", "expired_items", reaped)
 	}
 	h.history = kept
 
 	if h.store != nil {
 		go func() {
 			if n, err := h.store.DeleteExpired(now); err != nil {
-				slog.Error("failed to delete expired from db", "err", err)
+				slog.Error("failed to delete expired from db", "component", "hub_store", "error", err)
 			} else if n > 0 {
-				slog.Info("reaped expired clips from db", "count", n)
+				slog.Info("reaped expired clips from db", "component", "hub_store", "expired_items", n)
 			}
 		}()
 	}

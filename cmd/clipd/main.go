@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/thalysguimaraes/cliphub/internal/agent"
@@ -41,10 +42,10 @@ func run(ctx context.Context, args []string) error {
 	if *hubURL == "" {
 		url, err := resolver.HubURL(ctx)
 		if err != nil {
-			slog.Warn("hub auto-discovery failed, falling back to localhost", "err", err)
+			slog.Warn("hub auto-discovery failed; falling back to localhost", "component", "clipd", "error", err)
 			*hubURL = "http://localhost:8080"
 		} else {
-			slog.Info("discovered hub", "url", url)
+			slog.Info("discovered hub", "component", "clipd", "hub_url", url)
 			*hubURL = url
 		}
 	}
@@ -78,15 +79,15 @@ func run(ctx context.Context, args []string) error {
 }
 
 func runMain(args []string) int {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	if err := run(ctx, args); err != nil && err != context.Canceled {
 		var initErr *agent.ClipboardInitError
 		if errors.As(err, &initErr) {
-			slog.Error("clipboard init failed", "err", initErr.Err)
+			slog.Error("clipboard init failed", "component", "clipd", "error", initErr.Err)
 		} else {
-			slog.Error("clipd exited", "err", err)
+			slog.Error("clipd exited", "component", "clipd", "error", err)
 		}
 		return 1
 	}
