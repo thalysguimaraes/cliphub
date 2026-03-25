@@ -318,7 +318,7 @@ func TestPauseSourcesBlockRemoteApplyUntilResumed(t *testing.T) {
 			name: "pause file",
 			pause: func(t *testing.T, a *Agent) func() {
 				home := t.TempDir()
-				t.Setenv("HOME", home)
+				setTestHomeDir(t, home)
 				pausedPath := filepath.Join(home, ".config", "cliphub", "paused")
 				if err := os.MkdirAll(filepath.Dir(pausedPath), 0o755); err != nil {
 					t.Fatalf("mkdir pause dir: %v", err)
@@ -335,16 +335,16 @@ func TestPauseSourcesBlockRemoteApplyUntilResumed(t *testing.T) {
 		},
 	}
 
-		for _, tc := range tests {
-			t.Run(tc.name, func(t *testing.T) {
-				clip := &fakeClipboard{content: clipboard.Content{}}
-				a, err := New(Config{NodeName: "test", Clipboard: clip})
-				if err != nil {
-					t.Fatalf("New() error = %v", err)
-				}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			clip := &fakeClipboard{content: clipboard.Content{}}
+			a, err := New(Config{NodeName: "test", Clipboard: clip})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
 
-				resume := tc.pause(t, a)
-				a.applyRemote(protocol.ClipItem{
+			resume := tc.pause(t, a)
+			a.applyRemote(protocol.ClipItem{
 				MimeType: "text/plain",
 				Content:  "blocked-remote",
 				Source:   "other-node",
@@ -382,7 +382,7 @@ func TestPauseSourcesBlockLocalCaptureUntilResumed(t *testing.T) {
 			name: "pause file",
 			pause: func(t *testing.T, a *Agent) func() {
 				home := t.TempDir()
-				t.Setenv("HOME", home)
+				setTestHomeDir(t, home)
 				pausedPath := filepath.Join(home, ".config", "cliphub", "paused")
 				if err := os.MkdirAll(filepath.Dir(pausedPath), 0o755); err != nil {
 					t.Fatalf("mkdir pause dir: %v", err)
@@ -407,19 +407,19 @@ func TestPauseSourcesBlockLocalCaptureUntilResumed(t *testing.T) {
 				return r.Header.Get("X-Clip-Source")
 			})
 			srv := httptest.NewServer(mux)
-				defer srv.Close()
+			defer srv.Close()
 
-				clip := &fakeClipboard{content: textContent("local-while-paused")}
-				a, err := New(Config{
-					HubURL:       srv.URL,
-					NodeName:     "test",
-					PollInterval: 20 * time.Millisecond,
-					Clipboard:    clip,
-				})
-				if err != nil {
-					t.Fatalf("New() error = %v", err)
-				}
-				a.bootstrapped.Store(true)
+			clip := &fakeClipboard{content: textContent("local-while-paused")}
+			a, err := New(Config{
+				HubURL:       srv.URL,
+				NodeName:     "test",
+				PollInterval: 20 * time.Millisecond,
+				Clipboard:    clip,
+			})
+			if err != nil {
+				t.Fatalf("New() error = %v", err)
+			}
+			a.bootstrapped.Store(true)
 
 			resume := tc.pause(t, a)
 
@@ -453,4 +453,15 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	}
 
 	t.Fatal("condition not satisfied before timeout")
+}
+
+func setTestHomeDir(t *testing.T, home string) {
+	t.Helper()
+
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	if volume := filepath.VolumeName(home); volume != "" {
+		t.Setenv("HOMEDRIVE", volume)
+		t.Setenv("HOMEPATH", home[len(volume):])
+	}
 }
