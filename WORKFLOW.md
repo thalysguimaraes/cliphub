@@ -19,7 +19,7 @@ workspace:
   root: ~/Developer/personal/symphony-workspaces
 server:
   host: 0.0.0.0
-  port: 4045
+  port: 4040
 hooks:
   after_create: |
     git clone --depth 1 https://github.com/thalysguimaraes/cliphub.git .
