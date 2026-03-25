@@ -55,7 +55,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Run go test -race
-        run: go test -race ./...
+        run: make test-race
 
   smoke-build:
     name: Smoke Build (${{ matrix.os }})

@@ -65,6 +65,7 @@ git clone https://github.com/thalysguimaraes/cliphub.git
 cd cliphub
 make all    # builds bin/cliphub, bin/clipd, bin/tailclip
 make test   # runs all tests
+make test-race  # runs the race detector across the Go packages
 make release VERSION=v0.1.1-rc1  # writes deterministic release assets to dist/release
 ```
 
@@ -75,7 +76,7 @@ Public CI runs on pull requests and pushes to `main`.
 - `go test ./...` runs on Ubuntu, macOS, and Windows.
 - `go build ./cmd/clipd ./cmd/cliphub ./cmd/tailclip` runs on Ubuntu, macOS, and Windows as a native multi-binary smoke build.
 - `go vet ./...` runs on Ubuntu as the stable built-in lint gate.
-- `go test -race ./...` runs on Ubuntu as the race-detection gate.
+- `make test-race` (`go test -race ./...`) runs on Ubuntu as the race-detection gate.
 - `make release VERSION=ci-snapshot` plus `make release-verify VERSION=ci-snapshot` run on Ubuntu to smoke-test the deterministic release artifacts.
 
 Platform-specific exclusions:
@@ -118,6 +119,8 @@ The hub joins your tailnet as `cliphub` and becomes reachable at `https://cliphu
 clipd                            # auto-discovers hub from tailnet
 clipd -hub http://100.x.x.x     # explicit hub address
 clipd -poll 200                  # faster polling (ms)
+clipd -ignore-apps 1Password,Bitwarden -filter-sensitive otp,password-manager
+clipd -ignore-processes keepassxc -filter-sensitive secret -clear-on-block
 ```
 
 ### CLI
@@ -132,10 +135,26 @@ tailclip put --mime text/html "<b>bold</b>"
 tailclip history                 # recent clips
 tailclip history -n 5
 tailclip status                  # hub uptime, seq, subscribers
+tailclip clear                   # clear shared clipboard state + hub history
+tailclip clear --local           # also clear this machine's local clipboard
 tailclip pause / resume          # toggle sync on this machine
 ```
 
 Both `clipd` and `tailclip` auto-discover the hub by looking for the hostname in `CLIPHUB_HOSTNAME` on your tailnet (`cliphub` by default). Override the full URL with `--hub` or `CLIPHUB_HUB`.
+
+### Privacy controls
+
+Privacy controls are **opt-in**. By default, ClipHub keeps syncing every clipboard item it can read.
+
+- `--ignore-apps` / `CLIPHUB_IGNORE_APPS`: comma-separated foreground app names or bundle IDs that should never sync.
+- `--ignore-processes` / `CLIPHUB_IGNORE_PROCESSES`: comma-separated process names that should never sync.
+- `--filter-sensitive` / `CLIPHUB_FILTER_SENSITIVE`: comma-separated sensitive classes to block from sync. Supported classes are `secret`, `password-manager`, and `otp`.
+- `--clear-on-block` / `CLIPHUB_CLEAR_ON_BLOCK`: when a privacy rule blocks sync, also clear the local clipboard on that machine.
+
+Notes:
+
+- App/process detection is best-effort. On Linux, ignore lists and the `password-manager` class currently depend on `xdotool` being available so `clipd` can inspect the active window.
+- `secret` and `otp` filters are content-based and continue to work even when app/process detection is unavailable.
 
 ## How it works
 
@@ -160,9 +179,13 @@ After writing, the agent reads back the clipboard to handle platform format conv
 |--------|------|-------------|
 | `POST` | `/api/clip` | Submit content (`{"content":"...", "mime_type":"text/plain"}` or `{"data":"base64...", "mime_type":"image/png"}`) |
 | `GET` | `/api/clip` | Current item (204 if empty) |
+| `DELETE` | `/api/clip` | Clear current hub clipboard state and persisted history |
 | `GET` | `/api/clip/history?limit=N` | History (newest first) |
 | `GET` | `/api/clip/stream?since_seq=N` | WebSocket: live updates + catch-up replay |
-| `GET` | `/api/status` | Hub status |
+| `GET` | `/api/status` | Hub status, readiness, and lightweight counters |
+| `GET` | `/healthz` | Liveness check (200 while the process is healthy) |
+| `GET` | `/readyz` | Readiness check (503 while shutting down/draining) |
+| `GET` | `/metrics` | Prometheus-style text metrics for hub activity and lifecycle |
 
 ## Running as a service
 
@@ -205,9 +228,21 @@ The agent auto-discovers the hub from your tailnet by default. Set `CLIPHUB_HOST
 | Env var | Flag | Default | Description |
 |---------|------|---------|-------------|
 | `CLIPHUB_HUB` | `--hub` | auto-discovered | Hub URL |
+| `CLIPHUB_IGNORE_APPS` | `--ignore-apps` | empty | Comma-separated app names or bundle IDs to keep local |
+| `CLIPHUB_IGNORE_PROCESSES` | `--ignore-processes` | empty | Comma-separated process names to keep local |
+| `CLIPHUB_FILTER_SENSITIVE` | `--filter-sensitive` | empty | Comma-separated sensitive classes to block (`secret,password-manager,otp`) |
+| `CLIPHUB_CLEAR_ON_BLOCK` | `--clear-on-block` | `false` | Clear the local clipboard when a privacy rule blocks sync |
 | `CLIPHUB_HOSTNAME` | `--hostname` (hub only) | `cliphub` | Tailnet hostname used by the hub and auto-discovery |
 | `CLIPHUB_MAX_HISTORY` | `--max-history` | `50` | Max history items |
 | `CLIPHUB_TTL` | `--ttl` | `24h` | Item TTL |
+
+## Security and privacy limitations
+
+- Privacy filters are disabled by default. You must opt in with `clipd` flags or environment variables.
+- Hub history is stored as plain SQLite at `~/.config/cliphub/tsnet/clips.db`. The iOS cache is stored as plain JSON in the shared app-group container. ClipHub currently relies on OS-level disk encryption and file permissions rather than application-layer history encryption.
+- `tailclip clear` clears hub state and persisted history explicitly. Add `--local` if you also want to clear the current machine's system clipboard.
+- Clearing hub state does not retroactively wipe clipboard contents that were already written to other devices or stale offline caches. Clear those local clipboards separately if you need a full cleanup.
+- App/process ignore rules are best-effort because they depend on foreground-window inspection. On Linux, that currently requires `xdotool`.
 
 ## Roadmap
 

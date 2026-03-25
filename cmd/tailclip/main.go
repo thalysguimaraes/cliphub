@@ -8,10 +8,13 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
+	"github.com/thalysguimaraes/cliphub/internal/clipboard"
 	"github.com/thalysguimaraes/cliphub/internal/discover"
 	"github.com/thalysguimaraes/cliphub/internal/hubclient"
 )
@@ -22,7 +25,7 @@ var version = "dev"
 var hub *hubclient.Client
 
 func main() {
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 
 	// Allow --hub flag anywhere.
@@ -71,6 +74,8 @@ func main() {
 		err = cmdHistory(ctx, args[1:])
 	case "status":
 		err = cmdStatus(ctx)
+	case "clear":
+		err = cmdClear(ctx, args[1:])
 	case "pause":
 		err = cmdPause()
 	case "resume":
@@ -96,6 +101,7 @@ Commands:
   put --mime type [text]     Send with explicit MIME type
   history [-n N]             Show clipboard history
   status                     Show hub status
+  clear [--local]            Clear hub clipboard/history (and optionally this machine's clipboard)
   pause                      Pause clipboard sync
   resume                     Resume clipboard sync
 
@@ -246,14 +252,48 @@ func cmdHistory(ctx context.Context, args []string) error {
 	return nil
 }
 
+func cmdClear(ctx context.Context, args []string) error {
+	clearLocal := false
+	for _, arg := range args {
+		if arg == "--local" {
+			clearLocal = true
+		}
+	}
+
+	if err := hub.Clear(ctx); err != nil {
+		return err
+	}
+
+	if clearLocal {
+		localClipboard, err := clipboard.New()
+		if err != nil {
+			return err
+		}
+		if err := localClipboard.Clear(); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "cleared hub clipboard/history and the local system clipboard")
+		return nil
+	}
+
+	fmt.Fprintln(os.Stderr, "cleared hub clipboard/history")
+	return nil
+}
+
 func cmdStatus(ctx context.Context) error {
 	status, err := hub.Status(ctx)
 	if err != nil {
 		return err
 	}
 
-	for k, v := range status {
-		fmt.Printf("%-12s %v\n", k+":", v)
+	keys := make([]string, 0, len(status))
+	for key := range status {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	for _, key := range keys {
+		fmt.Printf("%-24s %v\n", key+":", status[key])
 	}
 	return nil
 }

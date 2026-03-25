@@ -3,7 +3,7 @@ GO_BUILD_FLAGS := -trimpath -buildvcs=false
 LDFLAGS := -ldflags "-X main.version=$(VERSION)"
 RELEASE_DIST ?= dist/release
 
-.PHONY: all cliphub clipd tailclip test lint clean release release-verify
+.PHONY: all cliphub clipd tailclip test test-race lint clean release release-verify
 
 all: cliphub clipd tailclip
 
@@ -18,6 +18,9 @@ tailclip:
 
 test:
 	go test ./...
+
+test-race:
+	go test -race ./...
 
 lint:
 	go vet ./...
