@@ -42,9 +42,9 @@ ClipHub uses a hub-and-spoke architecture: a lightweight broker runs inside your
 
 ```bash
 # Install
-go install github.com/thalys/cliphub/cmd/cliphub@latest
-go install github.com/thalys/cliphub/cmd/clipd@latest
-go install github.com/thalys/cliphub/cmd/tailclip@latest
+go install github.com/thalysguimaraes/cliphub/cmd/cliphub@latest
+go install github.com/thalysguimaraes/cliphub/cmd/clipd@latest
+go install github.com/thalysguimaraes/cliphub/cmd/tailclip@latest
 
 # Start the hub (joins your tailnet as "cliphub")
 cliphub

@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/thalys/cliphub/internal/protocol"
+	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
 
 // Config holds hub configuration.

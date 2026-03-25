@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thalys/cliphub/internal/clipboard"
-	"github.com/thalys/cliphub/internal/hub"
-	"github.com/thalys/cliphub/internal/protocol"
+	"github.com/thalysguimaraes/cliphub/internal/clipboard"
+	"github.com/thalysguimaraes/cliphub/internal/hub"
+	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
 
 // TestFailedSendRetry is a regression test for the exact failed-send replay

@@ -3,8 +3,8 @@ package agent
 import (
 	"sync"
 
-	"github.com/thalys/cliphub/internal/clipboard"
-	"github.com/thalys/cliphub/internal/protocol"
+	"github.com/thalysguimaraes/cliphub/internal/clipboard"
+	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
 
 // ClipboardMonitor tracks clipboard state and prevents feedback loops.

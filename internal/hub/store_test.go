@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/thalys/cliphub/internal/protocol"
+	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
 
 func TestStoreRoundTrip(t *testing.T) {

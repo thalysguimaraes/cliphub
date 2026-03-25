@@ -8,8 +8,8 @@ import (
 	"os/signal"
 	"time"
 
-	"github.com/thalys/cliphub/internal/agent"
-	"github.com/thalys/cliphub/internal/discover"
+	"github.com/thalysguimaraes/cliphub/internal/agent"
+	"github.com/thalysguimaraes/cliphub/internal/discover"
 )
 
 func main() {
