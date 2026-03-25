@@ -50,6 +50,7 @@ type clipStore interface {
 	LoadState(maxHistory int) (uint64, []protocol.ClipItem, error)
 	SaveItem(item protocol.ClipItem) (protocol.ClipItem, error)
 	DeleteExpired(before time.Time) (int, error)
+	DeleteAll() error
 }
 
 // New creates a Hub, optionally backed by SQLite, and starts the TTL reaper.
@@ -165,6 +166,23 @@ func (h *Hub) History(limit int) []protocol.ClipItem {
 		limit = len(h.history)
 	}
 	return cloneClipItems(h.history[:limit])
+}
+
+// Clear removes the current clip and persisted history while preserving the
+// sequence counter for future writes.
+func (h *Hub) Clear() error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+
+	if h.store != nil {
+		if err := h.store.DeleteAll(); err != nil {
+			return err
+		}
+	}
+
+	h.current = nil
+	h.history = nil
+	return nil
 }
 
 // Since returns all items in history with seq > afterSeq, in chronological order.

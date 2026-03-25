@@ -12,6 +12,10 @@ RestartSec=5
 # or CLIPHUB_HOSTNAME to discover a non-default hub hostname:
 # Environment=CLIPHUB_HUB=https://cliphub.your-tailnet.ts.net
 # Environment=CLIPHUB_HOSTNAME=custom-hub
+# Privacy controls are opt-in. Examples:
+# Environment=CLIPHUB_IGNORE_APPS=1Password,Bitwarden
+# Environment=CLIPHUB_FILTER_SENSITIVE=secret,otp
+# Environment=CLIPHUB_CLEAR_ON_BLOCK=true
 
 [Install]
 WantedBy=default.target

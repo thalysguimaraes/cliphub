@@ -18,3 +18,8 @@ Suggested headings:
 ### Added
 
 - Governance baseline for contributors and maintainers, including contribution, security, and conduct documentation plus GitHub issue and pull request templates.
+- Opt-in clipboard privacy controls for app/process ignore lists, sensitive-content filtering (`secret`, `password-manager`, `otp`), and explicit `tailclip clear` history wiping.
+
+### Security
+
+- Documented current privacy limitations, including plaintext-at-rest history storage and the scope of explicit clipboard clear behavior.

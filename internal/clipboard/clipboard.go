@@ -31,6 +31,9 @@ type Clipboard interface {
 
 	// Write sets the clipboard to the given content.
 	Write(Content) error
+
+	// Clear removes clipboard contents from the local system clipboard.
+	Clear() error
 }
 
 // typePriority defines the preference order for reading clipboard content.
