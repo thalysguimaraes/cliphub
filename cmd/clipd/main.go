@@ -15,6 +15,9 @@ import (
 	"github.com/thalysguimaraes/cliphub/internal/hubclient"
 )
 
+// version is injected via ldflags in reproducible release builds.
+var version = "dev"
+
 type agentRunner interface {
 	Run(context.Context) error
 }

@@ -65,6 +65,7 @@ git clone https://github.com/thalysguimaraes/cliphub.git
 cd cliphub
 make all    # builds bin/cliphub, bin/clipd, bin/tailclip
 make test   # runs all tests
+make release VERSION=v0.1.1-rc1  # writes deterministic release assets to dist/release
 ```
 
 ## CI
@@ -75,12 +76,18 @@ Public CI runs on pull requests and pushes to `main`.
 - `go build ./cmd/clipd ./cmd/cliphub ./cmd/tailclip` runs on Ubuntu, macOS, and Windows as a native multi-binary smoke build.
 - `go vet ./...` runs on Ubuntu as the stable built-in lint gate.
 - `go test -race ./...` runs on Ubuntu as the race-detection gate.
-- `make release` runs on Ubuntu to smoke-test the current cross-platform release target set.
+- `make release VERSION=ci-snapshot` plus `make release-verify VERSION=ci-snapshot` run on Ubuntu to smoke-test the deterministic release artifacts.
 
 Platform-specific exclusions:
 
 - Race detection is only required on `ubuntu-latest`; that keeps a single supported race gate in CI while still covering the full package set.
-- `make release` currently cross-builds `cliphub` only for `linux/amd64`, matching the existing release target. The native macOS and Windows smoke-build jobs still compile `cliphub` with `go build ./cmd/...`.
+- Release archives are generated from a single Linux host. The current target matrix ships `cliphub` for `linux/amd64` and ships `clipd`/`tailclip` for `darwin/amd64`, `darwin/arm64`, `linux/amd64`, and `windows/amd64`.
+
+## Releasing
+
+Tagged releases are published by `.github/workflows/release.yml`. The workflow builds deterministic archives, writes release notes and SHA-256 checksums, verifies the generated manifest, and uploads the full `dist/release/` bundle to the GitHub release.
+
+See [`docs/releases.md`](docs/releases.md) for the full dry-run and publish flow.
 
 ## Platform support
 

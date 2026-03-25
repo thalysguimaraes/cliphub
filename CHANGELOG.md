@@ -18,3 +18,8 @@ Suggested headings:
 ### Added
 
 - Governance baseline for contributors and maintainers, including contribution, security, and conduct documentation plus GitHub issue and pull request templates.
+- Deterministic release automation that builds publishable archives, writes SHA-256 checksums, generates release notes, and records release metadata for GitHub releases.
+
+### Changed
+
+- `make release` now emits publishable assets under `dist/release`, and `make release-verify` validates checksum and manifest consistency for dry runs and CI.
