@@ -30,10 +30,11 @@ iOS app / share extension / keyboard --> cliphub --> SQLite history
 
 1. A client discovers the hub URL from Tailscale metadata unless `--hub` or `CLIPHUB_HUB` overrides it.
 2. `clipd` polls the local clipboard every 500 ms and reads the richest available content in this order: `image/png`, `text/html`, then `text/plain`.
-3. The client hashes the content and MIME type. If the item is new and not one the client just wrote itself, it sends the item to `cliphub`.
-4. `cliphub` stores the clip, assigns a monotonic `seq`, and broadcasts it to WebSocket subscribers.
-5. Other clients receive the update, apply it locally, read back what the OS actually stored, and mark that result as self-written so the next poll does not loop the same item back to the hub.
-6. Reconnecting clients can resume from `since_seq` to catch up on missed items.
+3. `clipd` can optionally apply local privacy rules before upload. Blocked items stay local and can optionally clear the local clipboard.
+4. The client hashes the content and MIME type. If the item is new and not one the client just wrote itself, it sends the item to `cliphub`.
+5. `cliphub` stores the clip, assigns a monotonic `seq`, and broadcasts it to WebSocket subscribers.
+6. Other clients receive the update, apply it locally, read back what the OS actually stored, and mark that result as self-written so the next poll does not loop the same item back to the hub.
+7. Reconnecting clients can resume from `since_seq` to catch up on missed items.
 
 ## Persistence and retention
 
@@ -54,6 +55,12 @@ iOS app / share extension / keyboard --> cliphub --> SQLite history
 
 - `cliphub -dev` listens on localhost by default and skips the tailnet identity layer.
 - It is useful for local development only, not for network-exposed deployments.
+
+## Privacy controls in the architecture
+
+- Privacy controls are currently enforced in `clipd`, before content is uploaded to the hub.
+- Operators can opt in to app-ignore, process-ignore, and sensitive-content filters.
+- Those controls are local and best-effort. They do not retroactively delete content that was already synced to other devices or cached elsewhere.
 
 ## Why the architecture is centralized
 

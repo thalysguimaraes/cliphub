@@ -244,7 +244,7 @@ The agent auto-discovers the hub from your tailnet by default. Set `CLIPHUB_HOST
 The next adoption-critical gaps are:
 
 - turning the existing iOS companion into a clearly supported path,
-- adding privacy controls such as filters and ignore lists,
+- hardening the new privacy controls with clearer coverage, defaults, and cleanup semantics,
 - improving Windows clipboard fidelity and release packaging parity.
 
 See [Roadmap](docs/roadmap.md) for the current framing and [Known Limitations](docs/limitations.md) for the gaps that still apply today.

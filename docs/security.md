@@ -17,6 +17,18 @@ ClipHub is a sensitive product because it moves clipboard contents across device
 - By default, raw clipboard data remains on disk for up to 24 hours and up to 50 history items.
 - Content hashes are used for deduplication, but the raw content is also retained because clients need the original payload.
 - Clipboard contents are also exposed to the destination device's local clipboard and whatever OS or app integrations that device already permits.
+- The iOS companion cache is stored as plain JSON in the shared app-group container.
+
+## Current privacy controls
+
+ClipHub now includes opt-in privacy controls on the desktop agent:
+
+- `--ignore-apps` / `--ignore-processes` keep matching foreground contexts local.
+- `--filter-sensitive` can block `secret`, `password-manager`, and `otp` classes.
+- `--clear-on-block` can clear the local clipboard when a privacy rule blocks sync.
+- `tailclip clear` removes hub clipboard state and persisted history, and `tailclip clear --local` also clears the invoking machine's clipboard.
+
+These controls reduce exposure, but they are not the same as end-to-end secrecy or centrally enforced policy.
 
 ## What ClipHub protects well
 
@@ -31,7 +43,8 @@ ClipHub is a sensitive product because it moves clipboard contents across device
 - Selective sync or per-device access control. There are no per-item or per-client permissions today.
 - End-to-end encryption from source device to destination device.
 - At-rest encryption managed by ClipHub itself. Use OS or disk encryption if you need stronger local storage protections.
-- Content-aware filtering, redaction, ignore lists, or secret detection.
+- Reliable retroactive wipe semantics after content was already synced.
+- Perfect context detection. Ignore rules are best-effort and depend on what the local platform can observe.
 
 ## Important deployment caveats
 
@@ -56,6 +69,7 @@ ClipHub is a sensitive product because it moves clipboard contents across device
 - Do not sync passwords, one-time codes, private keys, or customer secrets unless every participating device is already trusted for that class of data.
 - Prefer full-disk encryption and standard device hardening on any machine that runs the hub.
 - Consider lowering `--ttl` and `--max-history` if you want less clipboard retention on disk.
+- If you enable privacy filters, treat them as defense-in-depth rather than a guarantee. Verify the specific rules you care about on the platforms you run.
 - Use Tailscale ACLs and device hygiene as your primary access-control layer.
 
 ## Vulnerability reporting

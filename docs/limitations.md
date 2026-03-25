@@ -30,12 +30,15 @@ ClipHub is intentionally small and opinionated. The current behavior favors pred
 ## Security and policy limitations
 
 - The hub is trusted with raw clipboard contents.
-- There are no per-app ignore lists, no secret filtering, no selective sync rules, and no policy engine yet.
+- Privacy controls exist, but they are opt-in and local to `clipd`; the hub does not centrally enforce them for every client.
+- Ignore-list behavior is best-effort because it depends on foreground-context detection. On Linux, that currently requires `xdotool`.
+- There is still no per-device permission model, selective sync, or application-layer history encryption.
 - Development mode is not a hardened network deployment path.
 
 ## Operational limitations
 
 - Auto-discovery depends on Tailscale metadata. If discovery fails, clients fall back to localhost-oriented behavior unless you set an explicit hub URL.
 - History retention is short by design. ClipHub is a sync tool, not a long-term clipboard archive.
+- `tailclip clear` and `tailclip clear --local` help with cleanup, but they do not retroactively wipe clipboard contents that were already written to other devices or offline caches.
 
 The planned work to address the biggest gaps is tracked in [Roadmap](roadmap.md).

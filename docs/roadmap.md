@@ -10,6 +10,7 @@ This roadmap focuses on the gaps that matter most for adoption. It is intentiona
 - macOS and Linux currently have the richest clipboard fidelity.
 - Windows desktop support exists, but only for plain text clipboard sync today.
 - An iOS companion app, keyboard extension, and share extension already exist in the repository, but they are still a source-first/manual-build path.
+- Opt-in privacy controls already exist for ignore lists, sensitive-content filters, and explicit clear behavior.
 
 ## Near-term priorities
 
@@ -17,10 +18,10 @@ This roadmap focuses on the gaps that matter most for adoption. It is intentiona
   - define packaging/signing expectations,
   - narrow the parity story relative to desktop,
   - document the security and user-experience trade-offs clearly.
-- Add privacy controls:
-  - security filters,
-  - app ignore lists,
-  - broader pause/scope controls.
+- Harden privacy controls beyond the current opt-in baseline:
+  - make coverage and platform caveats clearer,
+  - improve detection quality where foreground context is weak,
+  - tighten cleanup semantics and operator guidance.
 
 ## Medium-term gaps
 
