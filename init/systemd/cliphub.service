@@ -11,6 +11,8 @@ RestartSec=5
 StateDirectory=cliphub
 Environment=CLIPHUB_MAX_HISTORY=50
 Environment=CLIPHUB_TTL=24h
+# Optional: expose the hub under a non-default tailnet hostname.
+# Environment=CLIPHUB_HOSTNAME=custom-hub
 
 [Install]
 WantedBy=multi-user.target

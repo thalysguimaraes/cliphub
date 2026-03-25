@@ -9,8 +9,10 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
+	"github.com/thalysguimaraes/cliphub/internal/discover"
 	"github.com/thalysguimaraes/cliphub/internal/hub"
 	"tailscale.com/tsnet"
 )
@@ -18,6 +20,7 @@ import (
 func main() {
 	dev := flag.Bool("dev", false, "development mode: listen on localhost without tsnet")
 	addr := flag.String("addr", "localhost:8080", "listen address in dev mode")
+	hostname := flag.String("hostname", envString("CLIPHUB_HOSTNAME", discover.DefaultHubHostname), "tailnet hostname in tsnet mode")
 	stateDir := flag.String("state-dir", defaultStateDir(), "tsnet state directory")
 	maxHistory := flag.Int("max-history", envInt("CLIPHUB_MAX_HISTORY", 50), "max history items")
 	ttl := flag.Duration("ttl", envDuration("CLIPHUB_TTL", 24*time.Hour), "item TTL")
@@ -63,7 +66,7 @@ func main() {
 		slog.Info("cliphub dev mode", "addr", *addr)
 	} else {
 		srv := &tsnet.Server{
-			Hostname: "cliphub",
+			Hostname: *hostname,
 			Dir:      *stateDir,
 		}
 		defer srv.Close()
@@ -78,7 +81,7 @@ func main() {
 				slog.Error("tsnet listen failed", "err", err)
 				os.Exit(1)
 			}
-			slog.Info("cliphub listening on tailnet (plain HTTP)", "hostname", "cliphub")
+			slog.Info("cliphub listening on tailnet (plain HTTP)", "hostname", *hostname)
 		}
 
 		lc, err := srv.LocalClient()
@@ -95,7 +98,7 @@ func main() {
 			return who.Node.ComputedName
 		})
 
-		slog.Info("cliphub listening on tailnet", "hostname", "cliphub", "state_dir", *stateDir)
+		slog.Info("cliphub listening on tailnet", "hostname", *hostname, "state_dir", *stateDir)
 	}
 
 	server := &http.Server{
@@ -138,6 +141,13 @@ func envDuration(key string, fallback time.Duration) time.Duration {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
 		}
+	}
+	return fallback
+}
+
+func envString(key string, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok && strings.TrimSpace(v) != "" {
+		return v
 	}
 	return fallback
 }

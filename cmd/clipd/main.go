@@ -12,6 +12,7 @@ import (
 
 	"github.com/thalysguimaraes/cliphub/internal/agent"
 	"github.com/thalysguimaraes/cliphub/internal/discover"
+	"github.com/thalysguimaraes/cliphub/internal/hubclient"
 )
 
 type agentRunner interface {
@@ -36,8 +37,9 @@ func run(ctx context.Context, args []string) error {
 	if *hubURL == "" {
 		*hubURL = os.Getenv("CLIPHUB_HUB")
 	}
+	resolver := discover.NewResolver(discover.DefaultConfig())
 	if *hubURL == "" {
-		url, err := discover.HubURL()
+		url, err := resolver.HubURL(ctx)
 		if err != nil {
 			slog.Warn("hub auto-discovery failed, falling back to localhost", "err", err)
 			*hubURL = "http://localhost:8080"
@@ -48,7 +50,7 @@ func run(ctx context.Context, args []string) error {
 	}
 
 	if *nodeName == "" {
-		name, err := discover.SelfName()
+		name, err := resolver.SelfName(ctx)
 		if err != nil {
 			h, _ := os.Hostname()
 			*nodeName = h
@@ -57,8 +59,14 @@ func run(ctx context.Context, args []string) error {
 		}
 	}
 
+	client, err := hubclient.New(hubclient.Config{BaseURL: *hubURL})
+	if err != nil {
+		return err
+	}
+
 	a, err := newAgent(agent.Config{
 		HubURL:       *hubURL,
+		Client:       client,
 		NodeName:     *nodeName,
 		PollInterval: time.Duration(*pollMs) * time.Millisecond,
 	})
