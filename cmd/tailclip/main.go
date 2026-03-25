@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/thalysguimaraes/cliphub/internal/clipboard"
 	"github.com/thalysguimaraes/cliphub/internal/discover"
 	"github.com/thalysguimaraes/cliphub/internal/hubclient"
 )
@@ -70,6 +71,8 @@ func main() {
 		err = cmdHistory(ctx, args[1:])
 	case "status":
 		err = cmdStatus(ctx)
+	case "clear":
+		err = cmdClear(ctx, args[1:])
 	case "pause":
 		err = cmdPause()
 	case "resume":
@@ -95,6 +98,7 @@ Commands:
   put --mime type [text]     Send with explicit MIME type
   history [-n N]             Show clipboard history
   status                     Show hub status
+  clear [--local]            Clear hub clipboard/history (and optionally this machine's clipboard)
   pause                      Pause clipboard sync
   resume                     Resume clipboard sync
 
@@ -242,6 +246,34 @@ func cmdHistory(ctx context.Context, args []string) error {
 			fmt.Printf("#%-4d [%s ago] %s  %s  [%d bytes]\n", item.Seq, age, item.Source, item.MimeType, len(item.Data))
 		}
 	}
+	return nil
+}
+
+func cmdClear(ctx context.Context, args []string) error {
+	clearLocal := false
+	for _, arg := range args {
+		if arg == "--local" {
+			clearLocal = true
+		}
+	}
+
+	if err := hub.Clear(ctx); err != nil {
+		return err
+	}
+
+	if clearLocal {
+		localClipboard, err := clipboard.New()
+		if err != nil {
+			return err
+		}
+		if err := localClipboard.Clear(); err != nil {
+			return err
+		}
+		fmt.Fprintln(os.Stderr, "cleared hub clipboard/history and the local system clipboard")
+		return nil
+	}
+
+	fmt.Fprintln(os.Stderr, "cleared hub clipboard/history")
 	return nil
 }
 

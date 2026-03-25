@@ -17,6 +17,9 @@
 	<key>StandardErrorPath</key>
 	<string>/tmp/clipd.log</string>
 	<!-- Hub is auto-discovered from tailnet. Set CLIPHUB_HUB to override the URL,
-	     or CLIPHUB_HOSTNAME to discover a non-default hub hostname. -->
+	     or CLIPHUB_HOSTNAME to discover a non-default hub hostname.
+	     Privacy controls are opt-in via environment variables such as
+	     CLIPHUB_IGNORE_APPS, CLIPHUB_IGNORE_PROCESSES, CLIPHUB_FILTER_SENSITIVE,
+	     and CLIPHUB_CLEAR_ON_BLOCK. -->
 </dict>
 </plist>

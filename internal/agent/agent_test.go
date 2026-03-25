@@ -14,6 +14,7 @@ import (
 
 	"github.com/thalysguimaraes/cliphub/internal/clipboard"
 	"github.com/thalysguimaraes/cliphub/internal/hub"
+	"github.com/thalysguimaraes/cliphub/internal/privacy"
 	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
 
@@ -438,6 +439,93 @@ func TestPauseSourcesBlockLocalCaptureUntilResumed(t *testing.T) {
 				return item != nil && item.Content == "local-while-paused"
 			})
 		})
+	}
+}
+
+type staticContextProvider struct {
+	ctx privacy.Context
+	err error
+}
+
+func (p staticContextProvider) CurrentContext() (privacy.Context, error) {
+	return p.ctx, p.err
+}
+
+func TestPrivacyIgnoreListKeepsClipboardLocal(t *testing.T) {
+	h, _ := hub.New(hub.Config{MaxHistory: 10, TTL: time.Hour})
+	mux := http.NewServeMux()
+	hub.Register(mux, h, func(r *http.Request) string {
+		return r.Header.Get("X-Clip-Source")
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	clip := &fakeClipboard{content: textContent("keep local")}
+	a, err := New(Config{
+		HubURL:       srv.URL,
+		NodeName:     "test",
+		PollInterval: 20 * time.Millisecond,
+		Clipboard:    clip,
+		Privacy:      privacy.NewConfig([]string{"1password"}, nil, nil, false),
+		ContextProvider: staticContextProvider{
+			ctx: privacy.Context{AppName: "1Password 8"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	a.bootstrapped.Store(true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx)
+
+	time.Sleep(120 * time.Millisecond)
+	if item := h.Get(); item != nil {
+		t.Fatalf("expected ignore list to block sync, got %+v", item)
+	}
+	if got := clip.Content().Text(); got != "keep local" {
+		t.Fatalf("expected local clipboard to remain untouched, got %q", got)
+	}
+}
+
+func TestPrivacyFilterCanClearLocalClipboard(t *testing.T) {
+	h, _ := hub.New(hub.Config{MaxHistory: 10, TTL: time.Hour})
+	mux := http.NewServeMux()
+	hub.Register(mux, h, func(r *http.Request) string {
+		return r.Header.Get("X-Clip-Source")
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	classes, err := privacy.ParseSensitiveClasses("otp")
+	if err != nil {
+		t.Fatalf("ParseSensitiveClasses() error = %v", err)
+	}
+
+	clip := &fakeClipboard{content: textContent("Verification code: 123456")}
+	a, err := New(Config{
+		HubURL:       srv.URL,
+		NodeName:     "test",
+		PollInterval: 20 * time.Millisecond,
+		Clipboard:    clip,
+		Privacy:      privacy.NewConfig(nil, nil, classes, true),
+	})
+	if err != nil {
+		t.Fatalf("New() error = %v", err)
+	}
+	a.bootstrapped.Store(true)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go a.Run(ctx)
+
+	time.Sleep(120 * time.Millisecond)
+	if item := h.Get(); item != nil {
+		t.Fatalf("expected otp filter to block sync, got %+v", item)
+	}
+	if got := clip.Content().Text(); got != "" {
+		t.Fatalf("expected local clipboard to be cleared, got %q", got)
 	}
 }
 

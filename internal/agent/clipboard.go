@@ -28,10 +28,10 @@ func NewClipboardMonitor(clip clipboard.Clipboard) *ClipboardMonitor {
 type PollResult int
 
 const (
-	PollNoChange  PollResult = iota // Clipboard unchanged.
-	PollOwnWrite                    // We wrote this ourselves (remote update echo).
-	PollNewContent                  // Genuine new local content.
-	PollError                       // Error reading clipboard.
+	PollNoChange   PollResult = iota // Clipboard unchanged.
+	PollOwnWrite                     // We wrote this ourselves (remote update echo).
+	PollNewContent                   // Genuine new local content.
+	PollError                        // Error reading clipboard.
 )
 
 // Poll reads the clipboard and returns what happened plus the content if new.
@@ -68,14 +68,19 @@ func (m *ClipboardMonitor) Poll() (PollResult, clipboard.Content) {
 	return PollNewContent, ct
 }
 
-// MarkSent commits the pending poll state after a successful send to the hub.
-// If not called, the next Poll() will return the same content again, ensuring
-// no local clipboard changes are silently dropped on transient send failures.
-func (m *ClipboardMonitor) MarkSent() {
+// MarkHandled commits the pending poll state after the caller has intentionally
+// handled the clipboard content. If not called, the next Poll() will return the
+// same content again, ensuring transient failures do not silently drop items.
+func (m *ClipboardMonitor) MarkHandled() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.lastSeenHash = m.pendingHash
 	m.lastSeenMime = m.pendingMime
+}
+
+// MarkSent preserves the existing name for successful hub sends.
+func (m *ClipboardMonitor) MarkSent() {
+	m.MarkHandled()
 }
 
 // ApplyRemote writes a remote clipboard item to the local clipboard.
@@ -112,5 +117,23 @@ func (m *ClipboardMonitor) ApplyRemote(ct clipboard.Content) error {
 		m.mu.Unlock()
 	}
 
+	return nil
+}
+
+// ClearLocal clears the local system clipboard and resets monitor state so the
+// next poll sees an empty clipboard rather than re-processing old content.
+func (m *ClipboardMonitor) ClearLocal() error {
+	if err := m.clip.Clear(); err != nil {
+		return err
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.lastWrittenHash = ""
+	m.lastWrittenMime = ""
+	m.lastSeenHash = ""
+	m.lastSeenMime = ""
+	m.pendingHash = ""
+	m.pendingMime = ""
 	return nil
 }
