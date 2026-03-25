@@ -209,6 +209,18 @@ The agent auto-discovers the hub from your tailnet by default. Set `CLIPHUB_HOST
 - [ ] Phase 3 — iOS app with keyboard extension
 - [ ] Phase 4 — Security filters, app ignore lists, global pause
 
+## Contributing
+
+Contributions are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md) for setup, validation, and pull request expectations.
+
+- Use the GitHub issue templates for bugs and feature requests.
+- Update [CHANGELOG.md](CHANGELOG.md) when a change is notable to users, operators, or contributors.
+- Follow [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) in all project spaces.
+
+## Security
+
+Please do not report vulnerabilities in public issues or pull requests. Use the private reporting instructions in [SECURITY.md](SECURITY.md).
+
 ## License
 
 [MIT](LICENSE)

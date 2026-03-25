@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Contribution guide
+    url: https://github.com/thalysguimaraes/cliphub/blob/main/CONTRIBUTING.md
+    about: Read the project setup, validation, and pull request expectations before contributing.
+  - name: Private security report
+    url: https://github.com/thalysguimaraes/cliphub/security/policy
+    about: Report vulnerabilities privately instead of opening a public issue.
+  - name: Community expectations
+    url: https://github.com/thalysguimaraes/cliphub/blob/main/CODE_OF_CONDUCT.md
+    about: Review the Code of Conduct before participating in issues or pull requests.
