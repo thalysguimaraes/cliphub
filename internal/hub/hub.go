@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,6 +49,8 @@ type Hub struct {
 type clipStore interface {
 	Close() error
 	LoadState(maxHistory int) (uint64, []protocol.ClipItem, error)
+	HistoryPage(limit int, beforeSeq uint64) ([]protocol.ClipItem, error)
+	LoadItem(seq uint64) (*protocol.ClipItem, error)
 	SaveItem(item protocol.ClipItem) (protocol.ClipItem, error)
 	DeleteExpired(before time.Time) (int, error)
 }
@@ -167,6 +170,38 @@ func (h *Hub) History(limit int) []protocol.ClipItem {
 	return cloneClipItems(h.history[:limit])
 }
 
+// HistoryPage returns a cursor-addressable page of history items, newest-first.
+// When a persistent store is available, paging can extend beyond the in-memory history window.
+func (h *Hub) HistoryPage(limit int, beforeSeq uint64) ([]protocol.ClipItem, string, bool, error) {
+	if limit <= 0 {
+		limit = protocol.DefaultHistoryLimit
+	}
+
+	pageLimit := limit + 1
+	var items []protocol.ClipItem
+	var err error
+
+	if h.store != nil {
+		items, err = h.store.HistoryPage(pageLimit, beforeSeq)
+		if err != nil {
+			return nil, "", false, err
+		}
+	} else {
+		items = h.historyPageFromMemory(pageLimit, beforeSeq)
+	}
+
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+
+	nextCursor := ""
+	if hasMore && len(items) > 0 {
+		nextCursor = strconv.FormatUint(items[len(items)-1].Seq, 10)
+	}
+	return cloneClipItems(items), nextCursor, hasMore, nil
+}
+
 // Since returns all items in history with seq > afterSeq, in chronological order.
 func (h *Hub) Since(afterSeq uint64) []protocol.ClipItem {
 	h.mu.RLock()
@@ -179,6 +214,29 @@ func (h *Hub) Since(afterSeq uint64) []protocol.ClipItem {
 		}
 	}
 	return out
+}
+
+// GetBySeq returns a historical clip by sequence number, or nil when not found.
+func (h *Hub) GetBySeq(seq uint64) (*protocol.ClipItem, error) {
+	h.mu.RLock()
+	if h.current != nil && h.current.Seq == seq {
+		item := cloneClipItem(*h.current)
+		h.mu.RUnlock()
+		return &item, nil
+	}
+	for _, item := range h.history {
+		if item.Seq == seq {
+			cloned := cloneClipItem(item)
+			h.mu.RUnlock()
+			return &cloned, nil
+		}
+	}
+	h.mu.RUnlock()
+
+	if h.store == nil {
+		return nil, nil
+	}
+	return h.store.LoadItem(seq)
 }
 
 // Subscribe creates a new subscriber. Cancel the context to unsubscribe.
@@ -285,6 +343,31 @@ func cloneClipItems(items []protocol.ClipItem) []protocol.ClipItem {
 func cloneClipItem(item protocol.ClipItem) protocol.ClipItem {
 	item.Data = cloneBytes(item.Data)
 	return item
+}
+
+func (h *Hub) historyPageFromMemory(limit int, beforeSeq uint64) []protocol.ClipItem {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+
+	start := 0
+	if beforeSeq > 0 {
+		start = len(h.history)
+		for i, item := range h.history {
+			if item.Seq < beforeSeq {
+				start = i
+				break
+			}
+		}
+	}
+	if start >= len(h.history) {
+		return nil
+	}
+
+	end := start + limit
+	if end > len(h.history) {
+		end = len(h.history)
+	}
+	return cloneClipItems(h.history[start:end])
 }
 
 func cloneBytes(data []byte) []byte {

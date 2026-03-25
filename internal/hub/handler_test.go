@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,6 +139,15 @@ func TestPostClipEmptyContent(t *testing.T) {
 	if resp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("expected 400 for empty content, got %d", resp.StatusCode)
 	}
+
+	var apiErr protocol.ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if apiErr.Error.Code != "empty_content" {
+		t.Fatalf("expected typed empty_content error, got %+v", apiErr.Error)
+	}
 }
 
 func TestHistory(t *testing.T) {
@@ -157,6 +168,129 @@ func TestHistory(t *testing.T) {
 	}
 	if items[0].Seq != 3 {
 		t.Fatalf("expected most recent first, got seq %d", items[0].Seq)
+	}
+}
+
+func TestHistoryPagePagination(t *testing.T) {
+	dir := t.TempDir()
+	h, err := New(Config{MaxHistory: 2, TTL: time.Hour, DBPath: dir + "/clips.db"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+
+	mux := http.NewServeMux()
+	Register(mux, h, devIdentity)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	for _, item := range []string{"a", "b", "c", "d"} {
+		body := `{"content":"` + item + `"}`
+		resp, err := http.Post(srv.URL+"/api/clip", "application/json", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+	}
+
+	resp, err := http.Get(srv.URL + "/api/clip/history/page?limit=2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var firstPage protocol.HistoryPage
+	if err := json.NewDecoder(resp.Body).Decode(&firstPage); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if len(firstPage.Items) != 2 || firstPage.Items[0].Seq != 4 || firstPage.Items[1].Seq != 3 {
+		t.Fatalf("unexpected first page: %+v", firstPage)
+	}
+	if !firstPage.HasMore || firstPage.NextCursor != "3" {
+		t.Fatalf("expected next cursor 3 with more pages, got %+v", firstPage)
+	}
+	if firstPage.Items[0].DownloadPath != "/api/clip/blob?seq=4" {
+		t.Fatalf("expected download path on paged history, got %+v", firstPage.Items[0])
+	}
+
+	resp, err = http.Get(srv.URL + "/api/clip/history/page?limit=2&cursor=3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var secondPage protocol.HistoryPage
+	if err := json.NewDecoder(resp.Body).Decode(&secondPage); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if len(secondPage.Items) != 2 || secondPage.Items[0].Seq != 2 || secondPage.Items[1].Seq != 1 {
+		t.Fatalf("unexpected second page: %+v", secondPage)
+	}
+	if secondPage.HasMore || secondPage.NextCursor != "" {
+		t.Fatalf("expected last page without cursor, got %+v", secondPage)
+	}
+}
+
+func TestPostBlobAndGetBlob(t *testing.T) {
+	_, srv := setupServer(t)
+
+	resp, err := http.Post(srv.URL+"/api/clip/blob", "image/png", bytes.NewReader([]byte{0x89, 0x50, 0x4e, 0x47}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", resp.StatusCode)
+	}
+
+	var summary protocol.ClipSummary
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+
+	if summary.SizeBytes != 4 || summary.DownloadPath != "/api/clip/blob?seq=1" {
+		t.Fatalf("unexpected blob summary: %+v", summary)
+	}
+
+	downloadResp, err := http.Get(srv.URL + "/api/clip/blob?seq=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer downloadResp.Body.Close()
+
+	data, err := io.ReadAll(downloadResp.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if downloadResp.Header.Get("Content-Type") != "image/png" {
+		t.Fatalf("unexpected content-type %q", downloadResp.Header.Get("Content-Type"))
+	}
+	if !bytes.Equal(data, []byte{0x89, 0x50, 0x4e, 0x47}) {
+		t.Fatalf("unexpected blob bytes %#v", data)
+	}
+}
+
+func TestHistoryPageRejectsInvalidCursor(t *testing.T) {
+	_, srv := setupServer(t)
+
+	resp, err := http.Get(srv.URL + "/api/clip/history/page?cursor=abc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+
+	var apiErr protocol.ErrorResponse
+	if err := json.NewDecoder(resp.Body).Decode(&apiErr); err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if apiErr.Error.Code != "invalid_cursor" {
+		t.Fatalf("unexpected typed error %+v", apiErr.Error)
+	}
+	if !strings.Contains(apiErr.Error.Message, "cursor") {
+		t.Fatalf("expected cursor message, got %+v", apiErr.Error)
 	}
 }
 

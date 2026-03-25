@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,18 +40,34 @@ type Client struct {
 	requestTimeout time.Duration
 }
 
+// Blob contains raw clip bytes from the scalable blob download endpoint.
+type Blob struct {
+	Seq      uint64
+	MimeType string
+	Data     []byte
+}
+
 // ErrNoCurrentClip reports the hub's empty clipboard response.
 var ErrNoCurrentClip = errors.New("hub has no current clip")
 
 // HTTPError wraps non-success hub responses.
 type HTTPError struct {
 	StatusCode int
+	Code       string
+	Message    string
+	Details    map[string]string
 	Body       string
 }
 
 func (e *HTTPError) Error() string {
 	if e == nil {
 		return "hub request failed"
+	}
+	if e.Message != "" && e.Code != "" {
+		return fmt.Sprintf("hub: %s [%s] (%d)", e.Message, e.Code, e.StatusCode)
+	}
+	if e.Message != "" {
+		return fmt.Sprintf("hub: %s (%d)", e.Message, e.StatusCode)
 	}
 	if e.Body == "" {
 		return fmt.Sprintf("hub returned %d", e.StatusCode)
@@ -128,6 +145,17 @@ func (c *Client) Current(ctx context.Context) (*protocol.ClipItem, error) {
 
 // Put submits clipboard content to the hub.
 func (c *Client) Put(ctx context.Context, payload PutRequest) (*protocol.ClipItem, error) {
+	if payload.MimeType == "" {
+		if len(payload.Data) > 0 {
+			payload.MimeType = "application/octet-stream"
+		} else {
+			payload.MimeType = "text/plain"
+		}
+	}
+	if len(payload.Data) > 0 {
+		return c.putBlob(ctx, payload)
+	}
+
 	body, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -155,6 +183,43 @@ func (c *Client) Put(ctx context.Context, payload PutRequest) (*protocol.ClipIte
 	return &item, nil
 }
 
+func (c *Client) putBlob(ctx context.Context, payload PutRequest) (*protocol.ClipItem, error) {
+	headers := http.Header{"Content-Type": []string{payload.MimeType}}
+	if payload.Source != "" {
+		headers.Set("X-Clip-Source", payload.Source)
+	}
+
+	resp, err := c.do(ctx, http.MethodPost, c.endpoint("api", "clip", "blob"), bytes.NewReader(payload.Data), headers)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, readHTTPError(resp)
+	}
+
+	var summary protocol.ClipSummary
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	item := protocol.ClipItem{
+		Seq:       summary.Seq,
+		MimeType:  summary.MimeType,
+		Hash:      summary.Hash,
+		Source:    summary.Source,
+		CreatedAt: summary.CreatedAt,
+		ExpiresAt: summary.ExpiresAt,
+	}
+	if strings.HasPrefix(summary.MimeType, "text/") {
+		item.Content = string(payload.Data)
+	} else {
+		item.Data = append([]byte(nil), payload.Data...)
+	}
+	return &item, nil
+}
+
 // History fetches recent clipboard history.
 func (c *Client) History(ctx context.Context, limit int) ([]protocol.ClipItem, error) {
 	values := url.Values{}
@@ -177,6 +242,71 @@ func (c *Client) History(ctx context.Context, limit int) ([]protocol.ClipItem, e
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return items, nil
+}
+
+// HistoryPage fetches a cursor-addressable history page from the scalable history endpoint.
+func (c *Client) HistoryPage(ctx context.Context, limit int, cursor string) (*protocol.HistoryPage, error) {
+	values := url.Values{}
+	if limit > 0 {
+		values.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if cursor != "" {
+		values.Set("cursor", cursor)
+	}
+
+	resp, err := c.do(ctx, http.MethodGet, c.endpoint("api", "clip", "history", "page"), nil, nil, values)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, readHTTPError(resp)
+	}
+
+	var page protocol.HistoryPage
+	if err := json.NewDecoder(resp.Body).Decode(&page); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &page, nil
+}
+
+// Download fetches raw clip bytes from the scalable blob endpoint.
+// When seq is zero, it downloads the current clip.
+func (c *Client) Download(ctx context.Context, seq uint64) (*Blob, error) {
+	values := url.Values{}
+	if seq > 0 {
+		values.Set("seq", fmt.Sprintf("%d", seq))
+	}
+
+	resp, err := c.do(ctx, http.MethodGet, c.endpoint("api", "clip", "blob"), nil, nil, values)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNoContent {
+		return nil, ErrNoCurrentClip
+	}
+	if resp.StatusCode >= 400 {
+		return nil, readHTTPError(resp)
+	}
+
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	downloaded := &Blob{
+		MimeType: strings.TrimSpace(resp.Header.Get("Content-Type")),
+		Data:     data,
+	}
+	if seqHeader := strings.TrimSpace(resp.Header.Get("X-Clip-Seq")); seqHeader != "" {
+		if parsed, err := strconv.ParseUint(seqHeader, 10, 64); err == nil {
+			downloaded.Seq = parsed
+		}
+	}
+	return downloaded, nil
 }
 
 // Status fetches the current hub status payload.
@@ -273,5 +403,17 @@ func joinURLPath(basePath string, parts ...string) string {
 
 func readHTTPError(resp *http.Response) error {
 	body, _ := io.ReadAll(resp.Body)
-	return &HTTPError{StatusCode: resp.StatusCode, Body: string(body)}
+	httpErr := &HTTPError{
+		StatusCode: resp.StatusCode,
+		Body:       string(body),
+	}
+
+	var envelope protocol.ErrorResponse
+	if err := json.Unmarshal(body, &envelope); err == nil && envelope.Error.Code != "" {
+		httpErr.Code = envelope.Error.Code
+		httpErr.Message = envelope.Error.Message
+		httpErr.Details = envelope.Error.Details
+	}
+
+	return httpErr
 }

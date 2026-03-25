@@ -114,6 +114,22 @@ func cmdGet(ctx context.Context, args []string) error {
 		}
 	}
 
+	if outFile != "" {
+		blob, err := hub.Download(ctx, 0)
+		if errors.Is(err, hubclient.ErrNoCurrentClip) {
+			fmt.Fprintln(os.Stderr, "(clipboard empty)")
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(outFile, blob.Data, 0o644); err != nil {
+			return err
+		}
+		fmt.Fprintf(os.Stderr, "saved %s (%d bytes) to %s\n", blob.MimeType, len(blob.Data), outFile)
+		return nil
+	}
+
 	item, err := hub.Current(ctx)
 	if errors.Is(err, hubclient.ErrNoCurrentClip) {
 		fmt.Fprintln(os.Stderr, "(clipboard empty)")
@@ -124,22 +140,11 @@ func cmdGet(ctx context.Context, args []string) error {
 	}
 
 	if item.IsText() {
-		if outFile != "" {
-			return os.WriteFile(outFile, []byte(item.Content), 0o644)
-		}
 		fmt.Print(item.Content)
 		return nil
 	}
 
 	// Binary content.
-	if outFile != "" {
-		if err := os.WriteFile(outFile, item.Data, 0o644); err != nil {
-			return err
-		}
-		fmt.Fprintf(os.Stderr, "saved %s (%d bytes) to %s\n", item.MimeType, len(item.Data), outFile)
-		return nil
-	}
-
 	fmt.Fprintf(os.Stderr, "[%s, %d bytes] use -o <file> to save\n", item.MimeType, len(item.Data))
 	return nil
 }
