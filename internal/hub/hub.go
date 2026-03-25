@@ -110,10 +110,8 @@ func (h *Hub) Put(in PutInput) (protocol.ClipItem, bool) {
 		return *h.current, false
 	}
 
-	h.seq++
 	now := time.Now()
 	item := protocol.ClipItem{
-		Seq:       h.seq,
 		MimeType:  in.MimeType,
 		Content:   in.Content,
 		Data:      in.Data,
@@ -121,6 +119,21 @@ func (h *Hub) Put(in PutInput) (protocol.ClipItem, bool) {
 		Source:    in.Source,
 		CreatedAt: now,
 		ExpiresAt: now.Add(h.ttl),
+	}
+
+	if h.store != nil {
+		persisted, err := h.store.SaveItem(item)
+		if err != nil {
+			h.seq++
+			item.Seq = h.seq
+			slog.Error("failed to persist clip", "seq", item.Seq, "err", err)
+		} else {
+			item = persisted
+			h.seq = item.Seq
+		}
+	} else {
+		h.seq++
+		item.Seq = h.seq
 	}
 
 	h.current = &item
@@ -138,13 +151,6 @@ func (h *Hub) Put(in PutInput) (protocol.ClipItem, bool) {
 		}
 	}
 	h.subsMu.RUnlock()
-
-	// Persist to SQLite.
-	if h.store != nil {
-		if err := h.store.SaveItem(item); err != nil {
-			slog.Error("failed to persist clip", "seq", item.Seq, "err", err)
-		}
-	}
 
 	return item, true
 }
