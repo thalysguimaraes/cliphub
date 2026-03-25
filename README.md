@@ -48,6 +48,7 @@ The main supported path today is desktop sync across macOS, Linux, and Windows. 
 - [Known Limitations](docs/limitations.md) lists the current behavior, content-type, packaging, and operational constraints.
 - [Platform Support](docs/platform-support.md) is the canonical support statement for desktop platforms and the iOS companion.
 - [Roadmap](docs/roadmap.md) tracks the adoption-critical gaps still planned.
+- [Public Go SDK Scope](docs/go-sdk.md) records the recommendation for exposing a stable Go client outside `internal/hubclient`.
 
 ## Quick start
 
@@ -275,8 +276,9 @@ HTTP failures now return a structured JSON envelope that clients can branch on:
 ### Go SDK note
 
 First-party Go callers continue to use `internal/hubclient` while the HTTP
-contract settles. A public Go SDK/package decision is intentionally tracked as a
-separate follow-up rather than being bundled into this transport update.
+contract settles. The scoped recommendation for a public package now lives in
+[docs/go-sdk.md](docs/go-sdk.md); first-party callers should stay on
+`internal/hubclient` until that public surface is intentionally promoted.
 
 ## Running as a service
 
