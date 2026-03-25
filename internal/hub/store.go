@@ -7,7 +7,7 @@ import (
 
 	_ "modernc.org/sqlite"
 
-	"github.com/thalys/cliphub/internal/protocol"
+	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
 
 // Store provides durable persistence for hub state.

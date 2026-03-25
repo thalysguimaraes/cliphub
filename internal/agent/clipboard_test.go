@@ -3,7 +3,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/thalys/cliphub/internal/clipboard"
+	"github.com/thalysguimaraes/cliphub/internal/clipboard"
 )
 
 // fakeClipboard is an in-memory clipboard for testing.

@@ -1,4 +1,4 @@
-module github.com/thalys/cliphub
+module github.com/thalysguimaraes/cliphub
 
 go 1.26.1
 

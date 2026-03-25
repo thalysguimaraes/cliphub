@@ -8,7 +8,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
-	"github.com/thalys/cliphub/internal/protocol"
+	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
 
 // WSClient connects to the hub's WebSocket stream and delivers updates.

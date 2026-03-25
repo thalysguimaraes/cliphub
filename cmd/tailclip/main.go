@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/thalys/cliphub/internal/discover"
-	"github.com/thalys/cliphub/internal/protocol"
+	"github.com/thalysguimaraes/cliphub/internal/discover"
+	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
 
 var hubURL string

@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/thalys/cliphub/internal/hub"
+	"github.com/thalysguimaraes/cliphub/internal/hub"
 	"tailscale.com/tsnet"
 )
 
