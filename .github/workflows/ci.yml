@@ -89,3 +89,7 @@ jobs:
         run: make release VERSION=ci-snapshot
       - name: Verify release artifacts
         run: make release-verify VERSION=ci-snapshot
+      - name: Generate package-manager metadata
+        run: make release-package-managers VERSION=ci-snapshot RELEASE_ASSET_BASE_URL=https://github.com/thalysguimaraes/cliphub/releases/download/ci-snapshot
+      - name: Verify package-manager metadata
+        run: make release-package-managers-verify VERSION=ci-snapshot RELEASE_ASSET_BASE_URL=https://github.com/thalysguimaraes/cliphub/releases/download/ci-snapshot

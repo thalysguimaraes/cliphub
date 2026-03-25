@@ -88,6 +88,7 @@ Public CI runs on pull requests and pushes to `main`.
 - `go vet ./...` runs on Ubuntu as the stable built-in lint gate.
 - `make test-race` (`go test -race ./...`) runs on Ubuntu as the race-detection gate.
 - `make release VERSION=ci-snapshot` plus `make release-verify VERSION=ci-snapshot` run on Ubuntu to smoke-test the deterministic release artifacts.
+- `make release-package-managers VERSION=ci-snapshot` plus `make release-package-managers-verify VERSION=ci-snapshot` run on Ubuntu to dry-run the Homebrew, Scoop, and winget metadata generated from the release manifest/checksums.
 
 Platform-specific exclusions:
 
@@ -96,7 +97,7 @@ Platform-specific exclusions:
 
 ## Releasing
 
-Tagged releases are published by `.github/workflows/release.yml`. The workflow builds deterministic archives, writes release notes and SHA-256 checksums, verifies the generated manifest, and uploads the full `dist/release/` bundle to the GitHub release.
+Tagged releases are published by `.github/workflows/release.yml`. The workflow builds deterministic archives, writes release notes and SHA-256 checksums, verifies the generated manifest, uploads the core release assets, then generates Homebrew/Scoop/winget definitions from the published manifest/checksum assets and uploads those definitions to the same GitHub release.
 
 See [`docs/releases.md`](docs/releases.md) for the full dry-run and publish flow.
 

@@ -24,8 +24,29 @@ make release-verify VERSION=v0.1.1-rc1
 - `cliphub_<version>_checksums.txt`,
 - `cliphub_<version>_release_notes.md`,
 - `cliphub_<version>_artifacts.json`.
+- `package-managers/homebrew/{cliphub,clipd,tailclip}.rb`,
+- `package-managers/scoop/{clipd,tailclip}.json`,
+- `package-managers/winget/manifests/t/ThalysGuimaraes/{Clipd,Tailclip}/<version>/*.yaml` after `make release-package-managers`.
 
 `make release-verify` re-hashes every archive and confirms the checksum file, release notes, and manifest stay in sync.
+
+Generate package-manager metadata from the release manifest/checksums with:
+
+```bash
+make release-package-managers \
+  VERSION=v0.1.1-rc1 \
+  RELEASE_ASSET_BASE_URL=https://github.com/thalysguimaraes/cliphub/releases/download/v0.1.1-rc1
+
+make release-package-managers-verify \
+  VERSION=v0.1.1-rc1 \
+  RELEASE_ASSET_BASE_URL=https://github.com/thalysguimaraes/cliphub/releases/download/v0.1.1-rc1
+```
+
+The package-manager step mirrors the shipped artifact matrix instead of inventing bundle-specific archives:
+
+- Homebrew formulas: `cliphub` (Linux x86_64), `clipd` (macOS arm64/x86_64 and Linux x86_64), `tailclip` (macOS arm64/x86_64 and Linux x86_64).
+- Scoop manifests: `clipd`, `tailclip` (Windows x86_64).
+- winget manifests: `ThalysGuimaraes.Clipd`, `ThalysGuimaraes.Tailclip` (Windows x86_64 portable zip packages).
 
 ## GitHub release pipeline
 
@@ -35,9 +56,12 @@ make release-verify VERSION=v0.1.1-rc1
 2. runs `go test ./...`,
 3. runs `make release VERSION=<tag>`,
 4. runs `make release-verify VERSION=<tag>`,
-5. creates or updates the GitHub release and uploads every file from `dist/release/`.
+5. creates or updates the GitHub release and uploads the deterministic archives plus manifest/checksums,
+6. regenerates package-manager definitions from the published `cliphub_<tag>_artifacts.json` and `cliphub_<tag>_checksums.txt` assets,
+7. runs `make release-package-managers-verify VERSION=<tag>`,
+8. uploads the generated package-manager definition files to the same GitHub release.
 
-The workflow updates existing releases in place with `gh release upload --clobber`, so reruns are idempotent for the generated assets.
+The workflow updates existing releases in place with `gh release upload --clobber`, so reruns are idempotent for both the deterministic archives and the package-manager definitions.
 
 ## Reproducibility notes
 
@@ -45,7 +69,24 @@ The workflow updates existing releases in place with `gh release upload --clobbe
 - Builds use `CGO_ENABLED=0`, `-trimpath`, and `-buildvcs=false`.
 - `main.version` is injected with the release version via `-ldflags`.
 - Archive timestamps come from the tagged commit time (`git log -1 --format=%ct`), which becomes `SOURCE_DATE_EPOCH` for packaging.
-- The published checksum file and artifact manifest make downstream verification deterministic.
+- The published checksum file and artifact manifest drive downstream package-manager metadata, so Homebrew/Scoop/winget generation never rebuilds binaries.
+
+## Validation
+
+The repository dry-run path validates package-manager outputs with the same release inputs used for publishing:
+
+```bash
+make release VERSION=v0.1.1-rc1
+make release-verify VERSION=v0.1.1-rc1
+make release-package-managers VERSION=v0.1.1-rc1 RELEASE_ASSET_BASE_URL=https://github.com/thalysguimaraes/cliphub/releases/download/v0.1.1-rc1
+make release-package-managers-verify VERSION=v0.1.1-rc1 RELEASE_ASSET_BASE_URL=https://github.com/thalysguimaraes/cliphub/releases/download/v0.1.1-rc1
+```
+
+`make release-package-managers-verify` checks that:
+
+- generated Homebrew formulas match the manifest/checksum-derived asset URLs and pass `ruby -c` when Ruby is available,
+- Scoop manifests stay JSON-valid and point to the release zip archives with the expected SHA-256 hashes,
+- winget manifests stay YAML-valid and match the published portable zip metadata.
 
 ## Release notes
 
@@ -59,5 +100,4 @@ This keeps the narrative portion human-curated while automating the release-read
 
 ## Follow-ups
 
-- Package-manager distribution is tracked separately in `CLA-282` so it can consume the published manifest/checksum inputs instead of rebuilding binaries.
 - SBOM and provenance support were evaluated but are not enabled in this first pipeline. The current design leaves room to add GitHub artifact attestations and/or SBOM generation on top of the published manifest once signing and verification requirements are defined.
