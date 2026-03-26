@@ -3,7 +3,6 @@
 package clipboard
 
 import (
-	"bytes"
 	"encoding/base64"
 	"fmt"
 	"os"
@@ -36,40 +35,25 @@ func New() (Clipboard, error) {
 func (c *darwinClipboard) ReadBest() (Content, error) {
 	types, err := c.listTypes()
 	if err != nil {
-		// Fall back to pbpaste.
-		out, err := exec.Command("pbpaste").Output()
-		if err != nil {
-			return Content{}, err
-		}
-		return Content{MimeType: "text/plain", Data: out}, nil
+		return c.readPlainText()
 	}
 
 	best := bestType(types)
 	if best == "" {
-		// Fall back to pbpaste.
-		out, err := exec.Command("pbpaste").Output()
-		if err != nil {
-			return Content{}, err
-		}
-		return Content{MimeType: "text/plain", Data: out}, nil
+		return c.readPlainText()
 	}
 
 	return c.readType(best)
 }
 
 func (c *darwinClipboard) Write(ct Content) error {
-	if ct.MimeType == "text/plain" {
-		cmd := exec.Command("pbcopy")
-		cmd.Stdin = bytes.NewReader(ct.Data)
-		return cmd.Run()
-	}
-
 	uti, ok := mimeToUTI[ct.MimeType]
 	if !ok {
 		return fmt.Errorf("unsupported MIME type for macOS clipboard: %s", ct.MimeType)
 	}
 
-	// Write data to temp file, then use osascript to set clipboard.
+	// Write raw bytes to a temp file, then load via NSData to bypass
+	// pbcopy's locale-dependent encoding (macOS Roman under launchd).
 	tmp, err := os.CreateTemp("", "cliphub-*")
 	if err != nil {
 		return err
@@ -131,11 +115,7 @@ return output
 
 func (c *darwinClipboard) readType(mimeType string) (Content, error) {
 	if mimeType == "text/plain" {
-		out, err := exec.Command("pbpaste").Output()
-		if err != nil {
-			return Content{}, err
-		}
-		return Content{MimeType: "text/plain", Data: out}, nil
+		return c.readPlainText()
 	}
 
 	uti, ok := mimeToUTI[mimeType]
@@ -149,6 +129,35 @@ func (c *darwinClipboard) readType(mimeType string) (Content, error) {
 	return c.readBinary(uti, mimeType)
 }
 
+// readPlainText reads text from NSPasteboard as raw UTF-8 bytes via base64,
+// bypassing both pbpaste (locale-dependent encoding) and osascript's text
+// coercion (macOS Roman). Base64 is ASCII-safe so the encoding survives stdout.
+func (c *darwinClipboard) readPlainText() (Content, error) {
+	script := `
+use framework "AppKit"
+use framework "Foundation"
+set pb to current application's NSPasteboard's generalPasteboard()
+set textData to pb's dataForType:"public.utf8-plain-text"
+if textData is not missing value then
+	return (textData's base64EncodedStringWithOptions:0) as text
+end if
+return ""
+`
+	out, err := exec.Command("osascript", "-e", script).Output()
+	if err != nil {
+		return Content{}, err
+	}
+	b64 := strings.TrimSpace(string(out))
+	if b64 == "" {
+		return Content{}, fmt.Errorf("no text data on clipboard")
+	}
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return Content{}, fmt.Errorf("decode clipboard text: %w", err)
+	}
+	return Content{MimeType: "text/plain", Data: data}, nil
+}
+
 func (c *darwinClipboard) readHTML(uti string) (Content, error) {
 	script := fmt.Sprintf(`
 use framework "AppKit"
@@ -156,8 +165,7 @@ use framework "Foundation"
 set pb to current application's NSPasteboard's generalPasteboard()
 set htmlData to pb's dataForType:"%s"
 if htmlData is not missing value then
-	set htmlString to (current application's NSString's alloc()'s initWithData:htmlData encoding:(current application's NSUTF8StringEncoding))
-	return htmlString as text
+	return (htmlData's base64EncodedStringWithOptions:0) as text
 end if
 return ""
 `, uti)
@@ -165,9 +173,13 @@ return ""
 	if err != nil {
 		return Content{}, err
 	}
-	data := bytes.TrimSpace(out)
-	if len(data) == 0 {
+	b64 := strings.TrimSpace(string(out))
+	if b64 == "" {
 		return Content{}, fmt.Errorf("no HTML data on clipboard")
+	}
+	data, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		return Content{}, fmt.Errorf("decode clipboard html: %w", err)
 	}
 	return Content{MimeType: "text/html", Data: data}, nil
 }
