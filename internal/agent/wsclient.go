@@ -11,6 +11,9 @@ import (
 	"github.com/thalysguimaraes/cliphub/internal/protocol"
 )
 
+// wsReadLimit is the WebSocket read limit: MaxContentSize + headroom for JSON framing.
+const wsReadLimit = protocol.MaxContentSize + 64*1024
+
 // WSClient connects to the hub's WebSocket stream and delivers updates.
 type WSClient struct {
 	URL         string
@@ -53,6 +56,8 @@ func (c *WSClient) connect(ctx context.Context) error {
 		return err
 	}
 	defer conn.CloseNow()
+
+	conn.SetReadLimit(wsReadLimit)
 
 	slog.Info("connected to hub", "component", "clipd_stream", "hub_stream_url", url)
 

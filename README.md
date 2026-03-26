@@ -1,9 +1,5 @@
 <p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/thalysguimaraes/cliphub/main/assets/logo.svg?v=2">
-    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/thalysguimaraes/cliphub/main/assets/logo.svg?v=2">
-    <img src="https://raw.githubusercontent.com/thalysguimaraes/cliphub/main/assets/logo.svg?v=2" width="128" height="128" alt="ClipHub">
-  </picture>
+  <img src="https://raw.githubusercontent.com/thalysguimaraes/cliphub/main/assets/logo.png" width="128" height="128" alt="ClipHub">
 </p>
 
 <h1 align="center">ClipHub</h1>
